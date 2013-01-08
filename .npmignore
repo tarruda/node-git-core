@@ -1,0 +1,8 @@
+/node_modules
+/test
+*.log
+*.swp
+*~
+*.tgz
+Makefile
+.gitignore
