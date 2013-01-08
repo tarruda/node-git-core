@@ -8,42 +8,25 @@ function Tree(children) {
 }
 util.inherits(Tree, common.GitObject);
 
-Tree.prototype.serialize = function(visitor, cb){
-  var contentArray = []
-    , keys = Object.keys(this.children).sort()
-    , _this = this;
+Tree.prototype.toBuffer = function(visitor) {
+  var key, value, buffer, i
+    , contentArray = []
+    , keys = Object.keys(this.children).sort();
 
-  function serializeChild() {
-    var key, value;
-    if (!keys.length) {
-      process.nextTick(end);
-      return;
+  for (i = 0; i < keys.length; i++) {
+    key = keys[i];
+    value = this.children[key];
+    buffer = value.toBuffer(visitor); 
+    if (buffer.type === 'blob') {
+      contentArray.push(new Buffer("100644 " + key));
+    } else if (buffer.type === 'tree') {
+      contentArray.push(new Buffer("40000 " + key));
     }
-    key = keys.shift();
-    value = _this.children[key];
-    value.serialize(visitor, function(obj) {
-      var tmp;
-      tmp = [];
-      if (obj.type === 'blob') {
-        tmp.push(new Buffer("100644 " + key));
-      } else if (obj.type === 'tree') {
-        tmp.push(new Buffer("40000 " + key));
-      }
-      tmp.push(common.NULL);
-      tmp.push(new Buffer(obj.hash, 'hex'));
-      contentArray.push(Buffer.concat(tmp));
-      process.nextTick(serializeChild);
-    });
+    contentArray.push(common.NULL);
+    contentArray.push(new Buffer(buffer.hash, 'hex'));
   }
 
-  function end() {
-    if (!contentArray.length) {
-      throw new Error('Git tree must have at least one child object');
-    }
-    _this._writeBuffer(Buffer.concat(contentArray), visitor, cb);
-  }
-
-  process.nextTick(serializeChild);
+  return this._toBuffer(Buffer.concat(contentArray), visitor);
 };
 
 Tree.prototype.typeCode = 2;

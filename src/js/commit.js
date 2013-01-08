@@ -13,58 +13,31 @@ function Commit(tree, author, committer, date, message, parents) {
 }
 util.inherits(Commit, common.GitObject);
 
-Commit.prototype.serialize = function(visitor, cb){
-  var i, parent
+Commit.prototype.toBuffer = function(visitor) {
+  var i, parent, buffer
     , ts = common.timestamp(this.date)
-    , parents = this.parents.slice()
-    , contentArray = []
-    , _this = this;
+    , contentArray = [];
 
-  if (!this.tree) throw new Error('Git commit must reference a tree object');
-  if (!this.author) throw new Error('Git commit needs an author');
-  if (!this.committer) this.committer = this.author;
-  if (!this.message)  throw new Error('Git commit needs a message');
+  buffer = this.tree.toBuffer(visitor);
+  contentArray.push('tree ' + buffer.hash);
 
-  for (i = 0; i < parents.length; i++) {
-    parent = parents[i];
-    if (!(parent instanceof Commit) && !common.SHA1.test(parent.toString())) {
-      throw new Error('parent must be a commit or string in sha1 hex format');
-    }
-  }
-
-  function serializeTree() {
-    _this.tree.serialize(visitor, function(tree) {
-      contentArray.push("tree " + tree.hash);
-      process.nextTick(serializeParent);
-    });
-  }
-
-  function serializeParent() {
-    if (!parents.length) {
-      process.nextTick(end);
-      return;
-    }
-    parent = parents.shift();
+  for (i = 0; i < this.parents.length; i++) {
+    parent = this.parents[i];
     if (typeof parent === 'string') {
-      contentArray.push("parent " + parent);
-      process.nextTick(serializeParent);
+      contentArray.push('parent ' + parent);
     } else if (parent instanceof Commit) {
-      parent.serialize(visitor, function(commit) {
-        contentArray.push("parent " + commit.hash);
-        process.nextTick(serializeParent);
-      });
+      buffer = parent.toBuffer(visitor);
+      contentArray.push('parent ' + buffer.hash);
     }
   }
 
-  function end() {
-    contentArray.push("author " + _this.author + " " + ts);
-    contentArray.push("committer " + _this.committer + " " + ts);
-    contentArray.push('\n');
-    contentArray.push(_this.message);
-    _this._writeBuffer(new Buffer(contentArray.join('\n')), visitor, cb);
-  };
+  contentArray.push("author " + this.author + " " + ts);
+  if (!this.committer) this.committer = this.author;
+  contentArray.push("committer " + this.committer + " " + ts);
+  contentArray.push('\n');
+  contentArray.push(this.message);
 
-  process.nextTick(serializeTree);
+  return this._toBuffer(new Buffer(contentArray.join('\n')), visitor);
 };
 
 Commit.prototype.typeCode = 1;

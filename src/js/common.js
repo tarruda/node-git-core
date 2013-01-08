@@ -1,5 +1,4 @@
-var zlib = require('zlib')
-  , crypto = require('crypto')
+var crypto = require('crypto')
   , id = 0
   , NULL = new Buffer([0]);
 
@@ -30,7 +29,7 @@ function GitObject() {
   this._id = ++id;
 }
 
-GitObject.prototype._writeBuffer = function(content, visitor, cb){
+GitObject.prototype._toBuffer = function(content, visitor){
   var rv
     , type = this.constructor.name.toLowerCase()
     , header = new Buffer(type + " " + content.length)
@@ -45,7 +44,7 @@ GitObject.prototype._writeBuffer = function(content, visitor, cb){
     , typeCode: this.typeCode
   };
   invoke(visitor, this, rv);
-  invoke(cb, this, rv);
+  return rv;
 };
 
 exports.timestamp = timestamp;

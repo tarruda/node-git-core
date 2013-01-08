@@ -41,7 +41,7 @@ suite 'git repository manipulation', ->
     t3 = new Tree {
       'another-file.txt': b1
     }
-    author = 'Thiago de Arruda <>'
+    author = 'Thiago de Arruda <user@domain.com>'
     c1 = new Commit t1, author, null, d1, "Artificial commit 1"
     c2 = new Commit t2, author, null, d2, "Artificial commit 2", [c1]
     c3 = new Commit t3, author, null, d3, "Artificial commit 3", [c2]
@@ -59,47 +59,31 @@ suite 'git repository manipulation', ->
         git.stderr.on('end', end)
 
 writeGitGraph = (repo, root, refName, cb) ->
-  objs = []
-  write = ->
-    if objs.length
-      writeGitObject(repo, objs.shift(), write)
+  count = 0
+  writeCb = ->
+    count--
+    cb() if !count
+  headBuffer = root.toBuffer (buffer) ->
+    count++
+    writeGitBuffer(repo, buffer, writeCb)
+  if refName
+    if headBuffer.type == 'tag'
+      refType = 'tags'
     else
-      cb()
-  root.serialize ((obj) -> objs.push(obj)), (head) ->
-    if refName
-      if head.type == 'tag'
-        refType = 'tags'
-      else
-        refType = 'heads'
-      refPath = path.join(repo, '.git', 'refs', refType, refName)
-      ref = fs.createWriteStream(refPath, mode: 0o644)
-      ref.end(head.hash + '\n', 'utf8')
-      ref.on('close', write)
-    else
-      write()
+      refType = 'heads'
+    refPath = path.join(repo, '.git', 'refs', refType, refName)
+    fs.writeFileSync(refPath, headBuffer.hash, 'utf8')
       
-writeGitObject = (repo, obj, cb) ->
-  hash = obj.hash
-  objDir = path.join(repo, '.git', 'objects', hash.slice(0, 2))
-  fs.mkdir objDir, ->
-    objPath = path.join(objDir, hash.slice(2))
-    objFile = fs.createWriteStream(objPath, mode: 0o444)
+writeGitBuffer = (repo, buffer, cb) ->
+  hash = buffer.hash
+  dir = path.join(repo, '.git', 'objects', hash.slice(0, 2))
+  fs.mkdir dir, ->
+    bufferPath = path.join(dir, hash.slice(2))
+    bufferFile = fs.createWriteStream(bufferPath, mode: 0o444)
     deflate = zlib.createDeflate()
-    deflate.pipe(objFile)
-    objFile.on 'open', ->
-      deflate.end(obj.data)
-      if typeof cb == 'function' then objFile.on('close', cb)
-    objFile.on 'error', (err) ->
+    deflate.pipe(bufferFile)
+    bufferFile.on 'open', ->
+      deflate.end(buffer.data)
+      if typeof cb == 'function' then bufferFile.on('close', cb)
+    bufferFile.on 'error', (err) ->
       if typeof cb == 'function' then cb()
-
-readGitObject = (repo, hash, cb) ->
-  objDir = path.join(repo, '.git', 'objects', hash.slice(0, 2))
-  objPath = path.join(objDir, hash.slice(2))
-  objFile = fs.createReadStream(objPath)
-  buf = []
-  objFile.on 'data', (d) ->
-    buf.push(d)
-  objFile.on 'end', ->
-    cb(Buffer.concat(buf))
-
-

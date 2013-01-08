@@ -8,8 +8,12 @@ function Blob(content) {
 }
 util.inherits(Blob, common.GitObject);
 
-Blob.prototype.serialize = function(visitor, cb){
-  this._writeBuffer(new Buffer(this.content || ''), visitor, cb);
+Blob.prototype.toBuffer = function(visitor) {
+  var content = this.content;
+  
+  if (typeof content === 'string') content = new Buffer(content, 'utf8');
+
+  return this._toBuffer(content, visitor);
 };
 
 Blob.prototype.typeCode = 3;
