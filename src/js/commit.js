@@ -14,20 +14,20 @@ function Commit(tree, author, committer, date, message, parents) {
 util.inherits(Commit, common.GitObject);
 
 Commit.prototype.serialize = function(visitor) {
-  var i, parent, buffer
+  var i, parent, serialized
     , ts = common.timestamp(this.date)
     , contentArray = [];
 
-  buffer = this.tree.serialize(visitor);
-  contentArray.push('tree ' + buffer.hash);
+  serialized = this.tree.serialize(visitor);
+  contentArray.push('tree ' + serialized.getHash());
 
   for (i = 0; i < this.parents.length; i++) {
     parent = this.parents[i];
     if (typeof parent === 'string') {
       contentArray.push('parent ' + parent);
     } else if (parent instanceof Commit) {
-      buffer = parent.serialize(visitor);
-      contentArray.push('parent ' + buffer.hash);
+      serialized = parent.serialize(visitor);
+      contentArray.push('parent ' + serialized.getHash());
     }
   }
 

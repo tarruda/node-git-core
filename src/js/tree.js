@@ -9,21 +9,23 @@ function Tree(children) {
 util.inherits(Tree, common.GitObject);
 
 Tree.prototype.serialize = function(visitor) {
-  var key, value, buffer, i
+  var key, value, serialized, i, type, hash
     , contentArray = []
     , keys = Object.keys(this.children).sort();
 
   for (i = 0; i < keys.length; i++) {
     key = keys[i];
     value = this.children[key];
-    buffer = value.serialize(visitor); 
-    if (buffer.type === 'blob') {
+    serialized = value.serialize(visitor); 
+    type = serialized.getType();
+    hash = serialized.getHash();
+    if (type === 'blob') {
       contentArray.push(new Buffer("100644 " + key));
-    } else if (buffer.type === 'tree') {
+    } else if (type === 'tree') {
       contentArray.push(new Buffer("40000 " + key));
     }
     contentArray.push(common.NULL);
-    contentArray.push(new Buffer(buffer.hash, 'hex'));
+    contentArray.push(new Buffer(hash, 'hex'));
   }
 
   return this._serialize(Buffer.concat(contentArray), visitor);

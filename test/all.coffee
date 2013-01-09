@@ -35,19 +35,19 @@ writeGitGraph = (repo, root, refName, cb) ->
   writeCb = ->
     count--
     cb() if !count
-  headBuffer = root.serialize (buffer) ->
+  head = root.serialize (serialized) ->
     count++
-    writeGitBuffer(repo, buffer, writeCb)
+    writeGitObject(repo, serialized, writeCb)
   if refName
-    if headBuffer.type == 'tag'
+    if head.getType() == 'tag'
       refType = 'tags'
     else
       refType = 'heads'
     refPath = path.join(repo, '.git', 'refs', refType, refName)
-    fs.writeFileSync(refPath, headBuffer.hash, 'utf8')
+    fs.writeFileSync(refPath, head.getHash(), 'utf8')
       
-writeGitBuffer = (repo, buffer, cb) ->
-  hash = buffer.hash
+writeGitObject = (repo, serialized, cb) ->
+  hash = serialized.getHash()
   dir = path.join(repo, '.git', 'objects', hash.slice(0, 2))
   fs.mkdir dir, ->
     bufferPath = path.join(dir, hash.slice(2))
@@ -55,7 +55,7 @@ writeGitBuffer = (repo, buffer, cb) ->
     deflate = zlib.createDeflate()
     deflate.pipe(bufferFile)
     bufferFile.on 'open', ->
-      deflate.end(buffer.data)
+      deflate.end(serialized.getData())
       if typeof cb == 'function' then bufferFile.on('close', cb)
     bufferFile.on 'error', (err) ->
       if typeof cb == 'function' then cb()

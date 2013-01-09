@@ -17,7 +17,7 @@ function Tag(object, name, tagger, date, message, type) {
 util.inherits(Tag, common.GitObject);
 
 Tag.prototype.serialize = function(visitor) {
-  var buffer
+  var serialized
     , ts = common.timestamp(this.date)
     , contentArray = [];
 
@@ -26,9 +26,9 @@ Tag.prototype.serialize = function(visitor) {
     contentArray.push("type " + this.type);
     process.nextTick(end);
   } else {
-    buffer = this.object.serialize(visitor);
-    contentArray.push("object " + buffer.hash);
-    contentArray.push("type " + buffer.type);
+    serialized = this.object.serialize(visitor);
+    contentArray.push("object " + serialized.getHash());
+    contentArray.push("type " + serialized.getType());
   }
 
   contentArray.push("tag " + this.name);

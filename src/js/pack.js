@@ -1,5 +1,6 @@
 var crypto = require('crypto')
-  , zlib = require('./zlib');
+  , zlib = require('./zlib')
+  , MAGIC = 'PACK';
 
 
 // this implementation is based on the information at
@@ -12,8 +13,8 @@ function Pack(objects) {
 // similar objects in the pack, so it is mostly useful for sending
 // a relatively small amount of git objects to a remote repository
 Pack.prototype.serialize = function() {
-  var key, object, buffer, header, typeBits, data, encodedHeader, packContent
-    , encodedHeaderBytes, deflated, checksum
+  var key, object, serialized, header, typeBits, data, encodedHeader
+    , packContent, encodedHeaderBytes, deflated, checksum
     , hash = crypto.createHash('sha1')
     , contentArray = []
     , processed = {};
@@ -23,14 +24,14 @@ Pack.prototype.serialize = function() {
     object = this.objects[i];
     if (object._id in processed)
       continue;
-    object.serialize(function(buffer) {
-      processed[this._id] = buffer;
+    object.serialize(function(serialized) {
+      processed[this._id] = serialized;
     });
   }
 
   // calculate the packfile header
   header = new Buffer(12);
-  header.write("PACK");
+  header.write(MAGIC);
   header.writeUInt32BE(2, 4);
   header.writeUInt32BE(Object.keys(processed).length, 8);
   contentArray.push(header);
@@ -38,12 +39,12 @@ Pack.prototype.serialize = function() {
 
   // start packing objects
   for (key in processed) {
-    buffer = processed[key];
+    serialized = processed[key];
     // calculate the object header
-    typeBits = buffer.typeCode << 4;
+    typeBits = serialized.getTypeCode() << 4;
     // the header is only used for loose objects. in packfiles they
     // should not be used
-    data = removeObjectHeader(buffer.data);
+    data = serialized.getPackData();
     encodedHeaderBytes = encodePackEntrySize(data.length);
     encodedHeaderBytes[0] = encodedHeaderBytes[0] | typeBits;
     encodedHeader = new Buffer(encodedHeaderBytes);
@@ -54,27 +55,16 @@ Pack.prototype.serialize = function() {
     hash.update(deflated);
   }
 
-  // prepare the buffer to be returned and calculate trailing checksum
-  packContent = Buffer.concat(contentArray);
-  checksum = new Buffer(hash.digest('hex'), 'hex');
+  // append the trailing checksum
+  contentArray.push(new Buffer(hash.digest('hex'), 'hex'));
 
-  return Buffer.concat([packContent, checksum]);
+  return Buffer.concat(contentArray);
 }
-
-function removeObjectHeader(buffer) {
-  var i = 0;
-
-  while (buffer[i] != 0)
-    i++;
-
-  return buffer.slice(i + 1);
-}
-
 
 function encodePackEntrySize(size) {
-  // this is a variant of LEB128: http://en.wikipedia.org/wiki/LEB128
+  // this is an adaptation of LEB128: http://en.wikipedia.org/wiki/LEB128
   // with the difference that the first byte will contain type information
-  // in the first 3 bits
+  // in the first 3 data bits(the first bit is still a continuation flag)
   var lastByte = size & 0xf
     , bytes = [lastByte]
     , current = size >>> 4;

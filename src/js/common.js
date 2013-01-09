@@ -32,21 +32,40 @@ function GitObject() {
 }
 
 GitObject.prototype._serialize = function(content, visitor){
-  var rv
+  var rv, hash, packData
     , type = this.constructor.name.toLowerCase()
     , header = new Buffer(type + " " + content.length)
     , data = Buffer.concat([header, NULL, content])
-    , hash = crypto.createHash('sha1');
+    , _this = this;
 
-  hash.update(data);
-  rv = {
-      type: type
-    , hash: hash.digest('hex')
-    , data: data
-    , typeCode: this.typeCode
-  };
-  invoke(visitor, this, rv);
-  return rv;
+    rv = {
+        getHash: function() {
+          if (!hash) {
+            hash = crypto.createHash('sha1');
+            hash.update(data);
+            hash = hash.digest('hex')
+          }
+
+          return hash;
+        }
+      , getPackData: function() {
+          if (!packData)
+            packData = data.slice(header.length + 1);
+
+          return packData
+        }
+      , getData: function() {
+          return data;
+        }
+      , getType: function() {
+          return type;
+        }
+      , getTypeCode: function() {
+          return _this.typeCode;
+        }
+    };
+    invoke(visitor, this, rv);
+    return rv;
 };
 
 exports.timestamp = timestamp;
