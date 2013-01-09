@@ -11,7 +11,7 @@ function Pack(objects) {
 // FIXME this function does not currently applies delta compression to 
 // similar objects in the pack, so it is mostly useful for sending
 // a relatively small amount of git objects to a remote repository
-Pack.prototype.toBuffer = function() {
+Pack.prototype.serialize = function() {
   var key, object, buffer, header, typeBits, data, encodedHeader, packContent
     , encodedHeaderBytes, deflated, checksum
     , hash = crypto.createHash('sha1')
@@ -23,7 +23,7 @@ Pack.prototype.toBuffer = function() {
     object = this.objects[i];
     if (object._id in processed)
       continue;
-    object.toBuffer(function(buffer) {
+    object.serialize(function(buffer) {
       processed[this._id] = buffer;
     });
   }

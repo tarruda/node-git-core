@@ -13,12 +13,12 @@ function Commit(tree, author, committer, date, message, parents) {
 }
 util.inherits(Commit, common.GitObject);
 
-Commit.prototype.toBuffer = function(visitor) {
+Commit.prototype.serialize = function(visitor) {
   var i, parent, buffer
     , ts = common.timestamp(this.date)
     , contentArray = [];
 
-  buffer = this.tree.toBuffer(visitor);
+  buffer = this.tree.serialize(visitor);
   contentArray.push('tree ' + buffer.hash);
 
   for (i = 0; i < this.parents.length; i++) {
@@ -26,7 +26,7 @@ Commit.prototype.toBuffer = function(visitor) {
     if (typeof parent === 'string') {
       contentArray.push('parent ' + parent);
     } else if (parent instanceof Commit) {
-      buffer = parent.toBuffer(visitor);
+      buffer = parent.serialize(visitor);
       contentArray.push('parent ' + buffer.hash);
     }
   }
@@ -37,7 +37,7 @@ Commit.prototype.toBuffer = function(visitor) {
   contentArray.push('\n');
   contentArray.push(this.message);
 
-  return this._toBuffer(new Buffer(contentArray.join('\n')), visitor);
+  return this._serialize(new Buffer(contentArray.join('\n')), visitor);
 };
 
 Commit.prototype.typeCode = 1;

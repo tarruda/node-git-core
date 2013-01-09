@@ -31,7 +31,7 @@ function GitObject() {
   this._id = ++id;
 }
 
-GitObject.prototype._toBuffer = function(content, visitor){
+GitObject.prototype._serialize = function(content, visitor){
   var rv
     , type = this.constructor.name.toLowerCase()
     , header = new Buffer(type + " " + content.length)

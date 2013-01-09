@@ -8,7 +8,7 @@ function Tree(children) {
 }
 util.inherits(Tree, common.GitObject);
 
-Tree.prototype.toBuffer = function(visitor) {
+Tree.prototype.serialize = function(visitor) {
   var key, value, buffer, i
     , contentArray = []
     , keys = Object.keys(this.children).sort();
@@ -16,7 +16,7 @@ Tree.prototype.toBuffer = function(visitor) {
   for (i = 0; i < keys.length; i++) {
     key = keys[i];
     value = this.children[key];
-    buffer = value.toBuffer(visitor); 
+    buffer = value.serialize(visitor); 
     if (buffer.type === 'blob') {
       contentArray.push(new Buffer("100644 " + key));
     } else if (buffer.type === 'tree') {
@@ -26,7 +26,7 @@ Tree.prototype.toBuffer = function(visitor) {
     contentArray.push(new Buffer(buffer.hash, 'hex'));
   }
 
-  return this._toBuffer(Buffer.concat(contentArray), visitor);
+  return this._serialize(Buffer.concat(contentArray), visitor);
 };
 
 Tree.prototype.typeCode = 2;

@@ -35,7 +35,7 @@ writeGitGraph = (repo, root, refName, cb) ->
   writeCb = ->
     count--
     cb() if !count
-  headBuffer = root.toBuffer (buffer) ->
+  headBuffer = root.serialize (buffer) ->
     count++
     writeGitBuffer(repo, buffer, writeCb)
   if refName
@@ -121,7 +121,7 @@ suite 'git repository manipulation', ->
         pack = new Pack [@c3, @tag]
         gitUnpack = spawn 'git', ['unpack-objects', '-q', '--strict'],
           cwd: @path
-        gitUnpack.stdin.end(pack.toBuffer())
+        gitUnpack.stdin.end(pack.serialize())
         captureOutput gitUnpack, (stdout, stderr) =>
           expect(stdout).to.equal ''
           expect(stderr).to.equal ''
