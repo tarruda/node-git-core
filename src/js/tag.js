@@ -24,7 +24,6 @@ Tag.prototype.serialize = function(visitor) {
   if (typeof this.object === 'string') {
     contentArray.push("object " + this.object);
     contentArray.push("type " + this.type);
-    process.nextTick(end);
   } else {
     serialized = this.object.serialize(visitor);
     contentArray.push("object " + serialized.getHash());
@@ -37,6 +36,10 @@ Tag.prototype.serialize = function(visitor) {
   contentArray.push(this.message);
 
   return this._serialize(new Buffer(contentArray.join('\n')), visitor);
+};
+
+Tag.prototype.resolveReferences = function(objectPool) {
+  this.object = objectPool[this.object] || this.object;
 };
 
 Tag.deserialize = function(contents) {
@@ -74,7 +77,7 @@ Tag.deserialize = function(contents) {
     throw new Error('tag missing tagger');
   tagger = match[1];
   date = common.parseDate(match[2]);
-  pos = Buffer.byteLength(match[0]) + 3;
+  pos += Buffer.byteLength(match[0]) + 3;
 
   // message
   message = info.contents.slice(pos).toString('utf8');

@@ -110,6 +110,8 @@ GitObject.prototype._serialize = function(content, visitor){
     return rv;
 };
 
+GitObject.prototype.resolveReferences = function(objectPool) { };
+
 GitObject.getObjectInfo = function(type, contents) {
   var rv, header, hash, match
     , fullContents = contents;

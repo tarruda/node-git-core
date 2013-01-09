@@ -40,6 +40,15 @@ Commit.prototype.serialize = function(visitor) {
   return this._serialize(new Buffer(contentArray.join('\n')), visitor);
 };
 
+Commit.prototype.resolveReferences = function(objectPool) {
+  var i;
+
+  this.tree = objectPool[this.tree] || this.tree;
+
+  for (i = 0;i < this.parents.length;i++)
+    this.parents[i] = objectPool[this.parents[i]] || this.parents[i];
+};
+
 Commit.deserialize = function(contents) {
   var pos, tree, author, committer, date, message, match
     , parents = []

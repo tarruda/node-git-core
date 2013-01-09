@@ -81,36 +81,54 @@ Pack.prototype.serialize = function() {
 
 Pack.deserialize = function(buffer) {
   var i, count, pos, type, entryHeader, inflatedEntry, inflatedData
-    , deserialized
+    , deserialized, k, cls, size
+    , hash = crypto.createHash('sha1')
     , objectsById = {} // used after parsing objects to connect references
     , rv = new Pack(); 
 
   // verify magic number
   if (buffer.slice(0, 4).toString('utf8') !== MAGIC)
     throw new Error('Invalid pack magic number');
+  hash.update(buffer.slice(0, 4));
 
   // only accept version 2 packs
-  if (buffer.readUint32BE(4) !== 2)
+  if (buffer.readUInt32BE(4) !== 2)
     throw new Error('Invalid pack version');
+  hash.update(buffer.slice(4, 8));
 
-  count = buffer.readUint32BE(8);
+  count = buffer.readUInt32BE(8);
+  hash.update(buffer.slice(8, 12));
   pos = 12;
 
   // unpack all objects
   for (i = 0;i < count;i++) {
-    cls = types[(buffer[pos] & 0x70) >>> 4].cls;
+    type = (buffer[pos] & 0x70) >>> 4
+    cls = types[type];
     if (!cls)
-      throw new Error('invalid pack entry type code');
+      throw new Error('invalid pack entry type');
     entryHeader = decodePackEntryHeader(buffer, pos);
+    hash.update(buffer.slice(pos, entryHeader[1]));
     size = entryHeader[0];
     pos = entryHeader[1];
     inflatedEntry = zlib.inflate(buffer.slice(pos), size);
+    hash.update(buffer.slice(pos, pos + inflatedEntry[1]));
     inflatedData = inflatedEntry[0];
-    pos = inflatedEntry[1];
+    pos += inflatedEntry[1];
     deserialized = cls.deserialize(inflatedData);
+    objectsById[deserialized[1]] = deserialized[0];
+    rv.objects.push(deserialized[0]);
   }
 
+  // verify pack integrity
+  if (hash.digest('hex') !== buffer.slice(pos, pos + 20).toString('hex'))
+    throw new Error('Invalid pack checksum')
 
+  // connect the objects
+  for (k in objectsById) {
+    objectsById[k].resolveReferences(objectsById);
+  }
+
+  return rv;
 };
 
 function encodePackEntrySize(size) {
@@ -144,7 +162,7 @@ function decodePackEntryHeader(buffer, offset) {
     bits += 7;
   }
 
-  return [rv, pos];
+  return [rv, offset];
 }
 
 module.exports = Pack;

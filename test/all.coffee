@@ -124,8 +124,15 @@ suite 'object serialization/deserialization', ->
     expect(tag.name).to.equal @tag.name
     expect(tag.tagger).to.equal @tag.tagger
     expect(tag.date.getTime()).to.equal @tag.date.getTime()
+    expect(tag.message).to.equal @tag.message
     expect(hash).to.equal serialized.getHash()
 
+  test 'pack', ->
+    pack = new Pack [@c3, @tag]
+    serialized = pack.serialize()
+    deserialized = Pack.deserialize(serialized)
+    expect(serialized.toString 'base64').to.equal(
+      deserialized.serialize().toString('base64'))
 
 suite 'git repository manipulation', ->
 

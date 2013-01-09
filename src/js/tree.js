@@ -31,6 +31,16 @@ Tree.prototype.serialize = function(visitor) {
   return this._serialize(Buffer.concat(contentArray), visitor);
 };
 
+Tree.prototype.resolveReferences = function(objectPool) {
+  var k, v;
+  
+  for (k in this.children) {
+    v = this.children[k];
+    if (typeof v === 'string')
+      this.children[k] = objectPool[v] || v;
+  }
+};
+
 Tree.deserialize = function(contents) {
   var childName, hash, hashStart
     , match
