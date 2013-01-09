@@ -40,6 +40,50 @@ Commit.prototype.serialize = function(visitor) {
   return this._serialize(new Buffer(contentArray.join('\n')), visitor);
 };
 
-Commit.prototype.typeCode = 1;
+Commit.deserialize = function(contents) {
+  var pos, tree, author, committer, date, message, match
+    , parents = []
+    , info = common.GitObject.getObjectInfo('commit', contents);
+
+  // tree
+  match = /^tree\s([0-9a-f]{40})$/.exec(info.contents.slice(0, 45));
+  if (!match)
+    throw new Error('commit missing tree');
+  tree = match[1];
+  pos = 46; // linefeed
+
+  // parents
+  while (match = /^parent\s([0-9a-f]{40})$/.exec(
+    info.contents.slice(pos, pos + 47).toString('utf8'))) {
+    parents.push(match[1]);
+    pos += 48;
+  }
+
+  // author
+  match = /^author\s(.+\s<.*>)\s(.+)$/.exec(info.contents.slice(
+    pos, common.findLinefeed(info.contents, pos)).toString('utf8'));
+  if (!match)
+    throw new Error('commit missing author');
+  author = match[1];
+  date = common.parseDate(match[2]);
+  pos += Buffer.byteLength(match[0]) + 1;
+
+  // committer
+  // FIXME ignoring commit date
+  match = /^committer\s(.+\s<.*>)\s(?:.+)$/.exec(info.contents.slice(
+    pos, common.findLinefeed(info.contents, pos)).toString('utf8'));
+  if (!match)
+    throw new Error('commit missing committer');
+  committer = match[1];
+  pos += Buffer.byteLength(match[0]) + 3;
+
+  // message
+  message = info.contents.slice(pos).toString('utf8');
+
+  return [
+      new Commit(tree, author, committer, date, message, parents)
+    , info.hash
+  ];
+};
 
 module.exports = Commit;

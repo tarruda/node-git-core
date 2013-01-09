@@ -31,6 +31,32 @@ Tree.prototype.serialize = function(visitor) {
   return this._serialize(Buffer.concat(contentArray), visitor);
 };
 
-Tree.prototype.typeCode = 2;
+Tree.deserialize = function(contents) {
+  var childName, hash, hashStart
+    , match
+    , pos = 0
+    , children = {}
+    , info = common.GitObject.getObjectInfo('tree', contents);
+
+  while (pos < info.contents.length) {
+    // find the blob/tree name/mode
+    // FIXME for now this implementation is ignoring file modes
+    match = /^\d+\s(.+)$/.exec(info.contents.slice(
+      pos, common.findNull(info.contents, pos)).toString('utf8'));
+    if (!match)
+      throw new Error('could not parse tree');
+    childName = match[1];
+    hashStart = pos + Buffer.byteLength(match[0]) + 1; // skip NULL
+    hash = info.contents.slice(hashStart, hashStart + 20); 
+    children[childName] = hash.toString('hex');
+    pos = hashStart + 20;
+  }
+
+  // pos should equal the length by now
+  if (pos !== info.contents.length)
+    throw new Error('could not parse tree');
+
+  return [new Tree(children), info.hash];
+};
 
 module.exports = Tree;

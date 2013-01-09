@@ -1,7 +1,25 @@
-var crypto = require('crypto')
+var i, codes, types
+  , crypto = require('crypto')
   , zlib = require('./zlib')
+  , Commit = require('./commit')
+  , Tree = require('./tree')
+  , Blob = require('./blob')
+  , Tag = require('./tag')
   , MAGIC = 'PACK';
 
+
+codes = {
+    commit: {code: 1, cls: Commit}
+  , tree: {code: 2, cls: Tree}
+  , blob: {code: 3, cls: Blob}
+  , tag: {code: 4, cls: Tag}
+  , ofsdelta: {code: 6}
+  , refdelta: {code: 7}
+};
+types = {};
+Object.keys(codes).forEach(function(k) {
+  types[codes[k].code] = codes[k].cls;
+});
 
 // this implementation is based on the information at
 // http://www.kernel.org/pub/software/scm/git/docs/technical/pack-format.txt
@@ -9,9 +27,9 @@ function Pack(objects) {
   this.objects = objects || [];
 }
 
-// FIXME this function does not currently applies delta compression to 
+// FIXME this class does not currently applies delta compression to 
 // similar objects in the pack, so it is mostly useful for sending
-// a relatively small amount of git objects to a remote repository
+// small amounts of git objects to a remote repository
 Pack.prototype.serialize = function() {
   var key, object, serialized, header, typeBits, data, encodedHeader
     , packContent, encodedHeaderBytes, deflated, checksum
@@ -41,7 +59,7 @@ Pack.prototype.serialize = function() {
   for (key in processed) {
     serialized = processed[key];
     // calculate the object header
-    typeBits = serialized.getTypeCode() << 4;
+    typeBits = codes[serialized.getType()].code << 4;
     // the header is only used for loose objects. in packfiles they
     // should not be used
     data = serialized.getPackData();
@@ -60,6 +78,40 @@ Pack.prototype.serialize = function() {
 
   return Buffer.concat(contentArray);
 }
+
+Pack.deserialize = function(buffer) {
+  var i, count, pos, type, entryHeader, inflatedEntry, inflatedData
+    , deserialized
+    , objectsById = {} // used after parsing objects to connect references
+    , rv = new Pack(); 
+
+  // verify magic number
+  if (buffer.slice(0, 4).toString('utf8') !== MAGIC)
+    throw new Error('Invalid pack magic number');
+
+  // only accept version 2 packs
+  if (buffer.readUint32BE(4) !== 2)
+    throw new Error('Invalid pack version');
+
+  count = buffer.readUint32BE(8);
+  pos = 12;
+
+  // unpack all objects
+  for (i = 0;i < count;i++) {
+    cls = types[(buffer[pos] & 0x70) >>> 4].cls;
+    if (!cls)
+      throw new Error('invalid pack entry type code');
+    entryHeader = decodePackEntryHeader(buffer, pos);
+    size = entryHeader[0];
+    pos = entryHeader[1];
+    inflatedEntry = zlib.inflate(buffer.slice(pos), size);
+    inflatedData = inflatedEntry[0];
+    pos = inflatedEntry[1];
+    deserialized = cls.deserialize(inflatedData);
+  }
+
+
+};
 
 function encodePackEntrySize(size) {
   // this is an adaptation of LEB128: http://en.wikipedia.org/wiki/LEB128
@@ -81,7 +133,7 @@ function encodePackEntrySize(size) {
   return bytes;
 }
 
-function decodePackEntrySize(buffer, offset) {
+function decodePackEntryHeader(buffer, offset) {
   var bits = 4
     , byte = buffer[offset] & 0xf
     , rv = byte;

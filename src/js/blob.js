@@ -2,20 +2,24 @@ var util = require('util')
   , common = require('./common');
 
 
-function Blob(content) {
+function Blob(contents) {
   this.constructor.super_.call(this);
-  this.content = content;
+  this.contents = contents;
 }
 util.inherits(Blob, common.GitObject);
 
 Blob.prototype.serialize = function(visitor) {
-  var content = this.content;
+  var contents = this.contents;
   
-  if (typeof content === 'string') content = new Buffer(content, 'utf8');
+  if (typeof contents === 'string') contents = new Buffer(contents, 'utf8');
 
-  return this._serialize(content, visitor);
+  return this._serialize(contents, visitor);
 };
 
-Blob.prototype.typeCode = 3;
+Blob.deserialize = function(contents) {
+  var info = common.GitObject.getObjectInfo('blob', contents);
+
+  return [new Blob(info.contents), info.hash];
+};
 
 module.exports = Blob;
