@@ -15,6 +15,7 @@
     "git-objects"
   ],
   "devDependencies": {
+    "node-gyp": "*",
     "wrench": "*",
     "less": "*",
     "mocha": "*",

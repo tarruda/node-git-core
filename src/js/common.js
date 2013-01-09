@@ -26,6 +26,8 @@ function invoke(fn, context, arg) {
 }
 
 function GitObject() {
+  // since when packing a git object graph we may end up visiting
+  // the same object twice, this id is used to avoid duplicates
   this._id = ++id;
 }
 

@@ -1,15 +1,20 @@
 var _zlib = require('../../build/Release/binding.node')
   , returnCodes = {
-  Z_OK: binding.Z_OK,
-  Z_STREAM_END: binding.Z_STREAM_END,
-  Z_NEED_DICT: binding.Z_NEED_DICT,
-  Z_ERRNO: binding.Z_ERRNO,
-  Z_STREAM_ERROR: binding.Z_STREAM_ERROR,
-  Z_DATA_ERROR: binding.Z_DATA_ERROR,
-  Z_MEM_ERROR: binding.Z_MEM_ERROR,
-  Z_BUF_ERROR: binding.Z_BUF_ERROR,
-  Z_VERSION_ERROR: binding.Z_VERSION_ERROR
+  Z_OK: _zlib.Z_OK,
+  Z_STREAM_END: _zlib.Z_STREAM_END,
+  Z_NEED_DICT: _zlib.Z_NEED_DICT,
+  Z_ERRNO: _zlib.Z_ERRNO,
+  Z_STREAM_ERROR: _zlib.Z_STREAM_ERROR,
+  Z_DATA_ERROR: _zlib.Z_DATA_ERROR,
+  Z_MEM_ERROR: _zlib.Z_MEM_ERROR,
+  Z_BUF_ERROR: _zlib.Z_BUF_ERROR,
+  Z_VERSION_ERROR: _zlib.Z_VERSION_ERROR
 };
+// idea stolen from node.js zlib bindings
+Object.keys(returnCodes).forEach(function(k) {
+  returnCodes[returnCodes[k]] = k;
+});
+
 
 function checkBuffer(data) {
   if (!(data instanceof Buffer))
@@ -42,10 +47,6 @@ function inflate(data, inflatedsize) {
   return rv;
 }
 
-
-Object.keys(returnCodes).forEach(function(k) {
-  returnCodes[returnCodes[k]] = k;
-});
 
 exports.deflate = deflate;
 exports.inflate = inflate;

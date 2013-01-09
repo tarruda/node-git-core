@@ -1,4 +1,7 @@
 // helper zlib functions for easily inflating/deflating git packed objects
+// the default node.js zlib library cannot be used for parsing packfiles,
+// since it does not tell the amount of bytes consumed from input stream,
+// and this is needed when inflating pack entries
 #include <node.h>
 #include <node_buffer.h>
 #include <zlib.h>

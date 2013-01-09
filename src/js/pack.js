@@ -8,10 +8,13 @@ function Pack(objects) {
   this.objects = objects || [];
 }
 
-// FIXME this function does not currently applies delta compression
+// FIXME this function does not currently applies delta compression to 
+// similar objects in the pack, so it is mostly useful for sending
+// a relatively small amount of git objects to a remote repository
 Pack.prototype.toBuffer = function() {
   var key, object, buffer, header, typeBits, data, encodedHeader, packContent
-    , hash, encodedHeaderBytes, deflated, checksum
+    , encodedHeaderBytes, deflated, checksum
+    , hash = crypto.createHash('sha1')
     , contentArray = []
     , processed = {};
 
@@ -29,32 +32,37 @@ Pack.prototype.toBuffer = function() {
   header = new Buffer(12);
   header.write("PACK");
   header.writeUInt32BE(2, 4);
-  header.writeUInt32BE(Object.keys(this.objects).length, 8);
+  header.writeUInt32BE(Object.keys(processed).length, 8);
   contentArray.push(header);
+  hash.update(header);
 
   // start packing objects
   for (key in processed) {
     buffer = processed[key];
     // calculate the object header
-    typeBits = obj.typeCode << 4;
-    data = removeObjectHeader(obj.data);
+    typeBits = buffer.typeCode << 4;
+    // the header is only used for loose objects. in packfiles they
+    // should not be used
+    data = removeObjectHeader(buffer.data);
     encodedHeaderBytes = encodePackEntrySize(data.length);
     encodedHeaderBytes[0] = encodedHeaderBytes[0] | typeBits;
     encodedHeader = new Buffer(encodedHeaderBytes);
-    contentArray.push(encodedHeader);
     deflated = zlib.deflate(data);
+    contentArray.push(encodedHeader);
+    contentArray.push(deflated);
+    hash.update(encodedHeader);
+    hash.update(deflated);
   }
 
   // prepare the buffer to be returned and calculate trailing checksum
-  packContent = Buffer.concat([contentArray]);
-  hash = crypto.createHash('sha1');
-  hash.update(packContent);
+  packContent = Buffer.concat(contentArray);
   checksum = new Buffer(hash.digest('hex'), 'hex');
+
   return Buffer.concat([packContent, checksum]);
 }
 
 function removeObjectHeader(buffer) {
-  var i;
+  var i = 0;
 
   while (buffer[i] != 0)
     i++;
@@ -64,12 +72,12 @@ function removeObjectHeader(buffer) {
 
 
 function encodePackEntrySize(size) {
-  // The first byte will only contain the first 4 bits
-  // since 3 bits will be reserved for holding type information
-  // and that will be added outside this function
-  var current = size >>> 4
-    , lastByte = size & 0xf
-    , bytes = [lastByte];
+  // this is a variant of LEB128: http://en.wikipedia.org/wiki/LEB128
+  // with the difference that the first byte will contain type information
+  // in the first 3 bits
+  var lastByte = size & 0xf
+    , bytes = [lastByte]
+    , current = size >>> 4;
 
   while (current > 0) {
     // Set the most significant bit for the last processed byte to signal
@@ -84,8 +92,8 @@ function encodePackEntrySize(size) {
 }
 
 function decodePackEntrySize(buffer, offset) {
-  var bits = 4;
-    , byte = buffer[offset] & 0xf;
+  var bits = 4
+    , byte = buffer[offset] & 0xf
     , rv = byte;
 
   while (buffer[offset++] & 0x80) {
@@ -96,3 +104,5 @@ function decodePackEntrySize(buffer, offset) {
 
   return [rv, pos];
 }
+
+module.exports = Pack;
