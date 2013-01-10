@@ -20,7 +20,7 @@ function patchDelta(base, delta) {
   // start patching
   while (offset < delta.length) {
     opcode = delta[offset++];
-    if (opcode * 0x80) {
+    if (opcode & 0x80) {
       // copy instruction (copy bytes from base buffer to target buffer)
       baseOffset = 0;
       copyLength = 0;
@@ -86,7 +86,6 @@ function diffDelta(source, target) {
   encodeHeader(opcodes, source.length, target.length);
 
   // now build the hashtable containing the lines/blocks
-  j = i;
   while (i < source.length) {
     block = sliceBlock(source, i);
     blocks[block.toString('base64')] = i;
@@ -129,12 +128,31 @@ function diffDelta(source, target) {
     }
   }
 
+  if (bufferedLength) {
+    // pending buffered
+    emitInsert(opcodes, insertBuffer, bufferedLength);
+    bufferedLength = 0;
+  }
+
   // some assertion here won't hurt development
   if (i !== target.length) // TODO remove
     throw new Error('Error computing delta buffer');
 
-  return new Buffer(rv);
+  return new Buffer(opcodes);
 }
+
+// function used to split buffers into blocks(units for matching regions
+// in 'diffDelta')
+function sliceBlock(buffer, pos) {
+  var j = pos;
+
+  // advance until a block boundary is found
+  while (buffer[j] !== 10 && (j - pos < 90) && j < buffer.length) j++;
+  if (buffer[j] === 10) j++; // append the trailing linefeed to the block
+
+  return buffer.slice(pos, j);
+}
+
 
 // the insert instruction is just the number of bytes to copy from 
 // delta buffer(following the opcode) to target buffer.
@@ -195,6 +213,9 @@ function emitCopy(opcodes, source, offset, length) {
     opcodes.push((length & 0xff0000) >>> 16);
     code |= 0x40;
   }
+
+  // place the code at its position
+  opcodes[codeIdx] = code;
 }
 
 function getMatchLength(source, sourcePos, target, targetPos) {
@@ -203,17 +224,6 @@ function getMatchLength(source, sourcePos, target, targetPos) {
   while (source[sourcePos++] === target[targetPos++]) rv++;
 
   return rv;
-}
-
-// function used to split buffers into blocks(units for matching regions
-// in 'diffDelta')
-function sliceBlock(buffer, pos) {
-  var j = pos;
-
-  // advance until a block boundary is found
-  while (buffer[j] !== 10 && (j - pos < 90) && j < buffer.length) j++;
-
-  return buffer.slice(pos, j);
 }
 
 

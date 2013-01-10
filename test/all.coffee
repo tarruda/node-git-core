@@ -206,8 +206,14 @@ suite 'zlib binding', ->
 
 
 suite 'delta encoding/decoding', ->
-  test 'encode copy instructions', ->
-    a = new Buffer("text file line 1\ntext file line 2")
-    b = new Buffer("text file line 2\ntext file line 1")
-    delta = diffDelta(a, b)
+  test 'encode/decode 1', ->
+    a = new Buffer "text file line 1\ntext file line 2\na"
+    b = new Buffer "text file line 2\ntext file line 1\nab"
+    delta = diffDelta a, b
+    # the expected instructions to produce 'b' from 'a' are:
+    # 1 - copy 17 bytes from offset 17
+    # 2 - copy 17 bytes from offset 0
+    # 3 - insert ab
+    patched = patchDelta a, delta
+    expect(patched.toString 'hex').to.equal b.toString 'hex'
 
