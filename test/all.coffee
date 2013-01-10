@@ -213,7 +213,70 @@ suite 'delta encoding/decoding', ->
     # the expected instructions to produce 'b' from 'a' are:
     # 1 - copy 17 bytes from offset 17
     # 2 - copy 17 bytes from offset 0
-    # 3 - insert ab
+    # 3 - insert 'ab'
+    # which encodes to hex values each section being an opcode sequence:
+    # ----
+    # 23 24 (header)
+    # ----
+    # 91 = 80(copy) | 01(17 offset) | 10(17 length)
+    # 11 = 17 length
+    # 11 = 17 length
+    # ----
+    # 90 = 80(copy) | 10(17 length)
+    # 11 = 17 length
+    # ----
+    # 02 = (insert next two bytes)
+    # 61 62 = a b
+    expect(delta.toString('hex')).to.equal('23249111119011026162')
     patched = patchDelta a, delta
     expect(patched.toString 'hex').to.equal b.toString 'hex'
 
+  test 'encode/decode 2', ->
+    a = new Buffer(
+      """
+      some text
+      with some words
+      abcdef
+      ghijkl
+      mnopqr
+      ab
+      rst
+      """
+    )
+    b = new Buffer(
+      """
+      some text
+      words
+      abcdef
+      ghijkl
+      mnopqr
+      ba
+      rst
+      h
+      """
+    )
+    delta = diffDelta a, b
+    # the expected instructions to produce 'b' from 'a' are:
+    # 1 - copy 10 bytes from offset 0
+    # 2 - insert 'text file line 1'
+    # 3 - copy 7 bytes from offset 25
+    # 4 - insert 'h'
+    # which encodes to:
+    # 35 2d = (header)
+    # ----
+    # 90 = 80(copy) | 10(11 length) ( it matches |some words\nw|ords )
+    # 0b = 11 length
+    # 05 = (insert the next 5 bytes)
+    # 6f 72 64 73 0a = o r d s \n
+    # 91 = 80(copy) | 01(26 offset) | 10(18 length)
+    # 1a = 26 offset
+    # 15 = 21 length (abcdef\nghijkl\nmnopqr\n)
+    # 08 = (insert the next 8 bytes)
+    # 62 61 0a 72 73 74 0a 68 = b a \n r s t \n h
+    # observation:
+    # while it might seem that the 'rst' substring should match,
+    # notice that in the first buffer it actually is 'rst\n'
+    patched = patchDelta a, delta
+    expect(delta.toString 'hex').to.equal(
+      '352d900b056f7264730a911a150862610a7273740a68')
+    expect(patched.toString 'hex').to.equal b.toString 'hex'

@@ -1,6 +1,7 @@
 // the delta encoding used by git was inferred by reading the original
 // source at https://github.com/git/git/blob/master/patch-delta.c
-var MIN_COPY_LENGTH = 10; // minimum match length for copy instruction
+var MIN_COPY_LENGTH = 4; // minimum match length for copy instruction
+                        
 
 
 // produces a buffer that is the result of 'delta' applied to 'base'
@@ -42,8 +43,6 @@ function patchDelta(base, delta) {
     } else if (opcode) {
       // insert instruction (copy bytes from delta buffer to target buffer)
       // amount to copy is specified by the opcode itself
-      // (which limits the amount to copy to 127 since the first bit is not
-      // set)
       copyLength = opcode;
       delta.copy(rv, rvOffset, offset, offset + copyLength); 
       offset += copyLength;
