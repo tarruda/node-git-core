@@ -152,13 +152,11 @@ function encodePackEntrySize(size) {
 }
 
 function decodePackEntryHeader(buffer, offset) {
-  var bits = 4
-    , byte = buffer[offset] & 0xf
-    , rv = byte;
+  var rv = buffer[offset] & 0xf
+    , bits = 4;
 
   while (buffer[offset++] & 0x80) {
-    byte = buffer[offset] & 0x7f;
-    rv += byte << bits;
+    rv |= (buffer[offset] & 0x7f) << bits;
     bits += 7;
   }
 
