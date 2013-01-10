@@ -135,7 +135,7 @@ function encodePackEntrySize(size) {
   // this is an adaptation of LEB128: http://en.wikipedia.org/wiki/LEB128
   // with the difference that the first byte will contain type information
   // in the first 3 data bits(the first bit is still a continuation flag)
-  var lastByte = size & 0xf
+  var lastByte = size & 0x0f
     , bytes = [lastByte]
     , current = size >>> 4;
 
@@ -152,7 +152,7 @@ function encodePackEntrySize(size) {
 }
 
 function decodePackEntryHeader(buffer, offset) {
-  var rv = buffer[offset] & 0xf
+  var rv = buffer[offset] & 0x0f
     , bits = 4;
 
   while (buffer[offset++] & 0x80) {

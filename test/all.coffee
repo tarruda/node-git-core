@@ -7,6 +7,7 @@ wrench = require 'wrench'
 {expect} = require 'chai'
 {Blob, Tree, Commit, Tag, Pack} = require '../src/js'
 _zlib = require '../src/js/zlib'
+{patchDelta, diffDelta} = require '../src/js/delta'
 
 
 createGitRepo = (done) ->
@@ -202,4 +203,11 @@ suite 'zlib binding', ->
     [inflated, bytesRead] = _zlib.inflate mixedData, data.length
     expect(inflated.toString()).to.equal data.toString()
     expect(bytesRead).to.equal deflated.length
+
+
+suite 'delta encoding/decoding', ->
+  test 'encode copy instructions', ->
+    a = new Buffer("text file line 1\ntext file line 2")
+    b = new Buffer("text file line 2\ntext file line 1")
+    delta = diffDelta(a, b)
 

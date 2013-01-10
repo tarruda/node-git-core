@@ -1,32 +1,13 @@
 // the delta encoding used by git was inferred by reading the original
 // source at https://github.com/git/git/blob/master/patch-delta.c
+var MIN_COPY_LENGTH = 10; // minimum match length for copy instruction
 
-
-// gets sizes of the base buffer/target buffer formatted in LEB128 and
-// the delta header length
-function getHeader(buffer) {
-  var offset = 0;
-
-  function nextSize() {
-    var rv = buffer[offset]
-      , bits = 7;
-
-    while (buffer[offset++] & 0x80) {
-      rv |= (buffer[offset] & 0x7f) << bits;
-      bits += 7;
-    }
-
-    return rv;
-  }
-
-  return [nextSize(), nextSize(), offset];
-}
 
 // produces a buffer that is the result of 'delta' applied to 'base'
 function patchDelta(base, delta) {
   var rv, opcode, baseOffset, copyLength
     , rvOffset = 0
-    , header = getHeader(delta)
+    , header = decodeHeader(delta)
     , offset = header[2];
 
   // assert the size of the base buffer
@@ -48,34 +29,231 @@ function patchDelta(base, delta) {
       // first we get the offset in the source buffer where 
       // the copy will start
       if (opcode & 0x01) baseOffset = delta[offset++];
-      if (opcode & 0x02) baseOffset |= delta[offset++] <<< 8;
-      if (opcode & 0x04) baseOffset |= delta[offset++] <<< 16;
-      if (opcode & 0x08) baseOffset |= delta[offset++] <<< 24;
+      if (opcode & 0x02) baseOffset |= delta[offset++] << 8;
+      if (opcode & 0x04) baseOffset |= delta[offset++] << 16;
+      if (opcode & 0x08) baseOffset |= delta[offset++] << 24;
       // now the amount of bytes to copy
       if (opcode & 0x10) copyLength = delta[offset++];
-      if (opcode & 0x20) copyLength |= delta[offset++] <<< 8;
-      if (opcode & 0x40) copyLength |= delta[offset++] <<< 16;
+      if (opcode & 0x20) copyLength |= delta[offset++] << 8;
+      if (opcode & 0x40) copyLength |= delta[offset++] << 16;
       if (copyLength === 0) copyLength = 0x10000;
       // copy the data
       base.copy(rv, rvOffset, baseOffset, baseOffset + copyLength);
     } else if (opcode) {
       // insert instruction (copy bytes from delta buffer to target buffer)
-      // amount to copy is specified in the current position
-      copyLength = delta[offset];
+      // amount to copy is specified by the opcode itself
+      // (which limits the amount to copy to 127 since the first bit is not
+      // set)
+      copyLength = opcode;
       delta.copy(rv, rvOffset, offset, offset + copyLength); 
       offset += copyLength;
     } else {
       throw new Error('Invalid delta opcode');
     }
-    // advanced target position
+    // advance target position
     rvOffset += copyLength;
   }
 
   // assert the size of the target buffer
   if (rvOffset !== rv.length)
-    throw new Error('Error patching buffer');
+    throw new Error('Error patching the base buffer');
 
   return rv;
 }
 
-// TODO write a 'diffDelta' function
+// produces a buffer that contains instructions on how to
+// construct 'target' from 'source' using copy/insert encoding.
+// based on the algorithm described in the paper
+// 'File System Support for Delta Compression'.
+// key differences are:
+//  - No fingerprint function is used explicitly, instead we rely on
+//    javascript objects as hash tables (FIXME)
+//  - The block size is variable and determined by linefeeds or
+//    chunk of 90 bytes whatever comes first
+//  - javascript objects only support string as keys, we
+//    use base64 encoding of buffer slices as the 'fingerprint' (FIXME)
+//  - this is slow and was added as a util for testing 'patchDelta', so it 
+//    should not be used indiscriminately
+function diffDelta(source, target) {
+  var block, matchOffset, matchLength, insertLength
+    , i = 0
+    , insertBuffer = new Buffer(127)
+    , bufferedLength = 0
+    , blocks = {}
+    , opcodes = [];
+
+  // first step is to encode the source and target sizes
+  encodeHeader(opcodes, source.length, target.length);
+
+  // now build the hashtable containing the lines/blocks
+  j = i;
+  while (i < source.length) {
+    block = sliceBlock(source, i);
+    blocks[block.toString('base64')] = i;
+    i += block.length;
+  }
+
+  // now walk the target, looking for block matches
+  i = 0;
+  while (i < target.length) {
+    block = sliceBlock(target, i); 
+    matchLength = 0;
+    matchOffset = blocks[block.toString('base64')];
+    if (typeof matchOffset === 'number')
+      // match found, find the length
+      matchLength = getMatchLength(source, matchOffset, target, i);
+    if (matchLength < MIN_COPY_LENGTH) {
+      // this will happen when a match is not found or it is too short
+      // either way we will insert or buffer data
+      insertLength = block.length + matchLength;
+      if (bufferedLength + insertLength <= insertBuffer.length) {
+        // buffer as much data as permitted(127)
+        target.copy(insertBuffer, bufferedLength, i, i + insertLength);
+        bufferedLength += insertLength;
+      } else {
+        // emit insert for the buffered data
+        emitInsert(opcodes, insertBuffer, bufferedLength);
+        // start buffering again
+        target.copy(insertBuffer, 0, i, i + insertLength);
+        bufferedLength = insertLength;
+      }
+      i += insertLength;
+    } else {
+      if (bufferedLength) {
+        // pending buffered data, flush it before copying
+        emitInsert(opcodes, insertBuffer, bufferedLength);
+        bufferedLength = 0;
+      }
+      emitCopy(opcodes, source, matchOffset, matchLength);
+      i += matchLength;
+    }
+  }
+
+  // some assertion here won't hurt development
+  if (i !== target.length) // TODO remove
+    throw new Error('Error computing delta buffer');
+
+  return new Buffer(rv);
+}
+
+// the insert instruction is just the number of bytes to copy from 
+// delta buffer(following the opcode) to target buffer.
+// it must be less than 128 since when the MSB is set it will be a
+// copy opcode
+function emitInsert(opcodes, buffer, length) {
+  var i;
+
+  if (length > 127) // TODO remove
+    throw new Error('invalid insert opcode');
+
+  opcodes.push(length);
+
+  for (i = 0; i < length; i++) {
+    opcodes.push(buffer[i]);
+  }
+}
+
+function emitCopy(opcodes, source, offset, length) {
+  var code, codeIdx;
+ 
+  opcodes.push(null);
+  codeIdx = opcodes.length - 1;
+  code = 0x80 // set the MSB
+
+  // offset and length are written using a compact encoding
+  if (offset & 0xff) {
+    opcodes.push(offset & 0xff);
+    code |= 0x01;
+  }
+
+  if (offset & 0xff00) {
+    opcodes.push((offset & 0xff00) >>> 8);
+    code |= 0x02;
+  }
+
+  if (offset & 0xff0000) {
+    opcodes.push((offset & 0xff0000) >>> 16);
+    code |= 0x04;
+  }
+
+  if (offset & 0xff000000) {
+    opcodess.push((offset & 0xff000000) >>> 24);
+    code |= 0x08;
+  }
+  
+  if (length & 0xff) {
+    opcodes.push(length & 0xff);
+    code |= 0x10;
+  }
+
+  if (length & 0xff00) {
+    opcodes.push((length & 0xff00) >>> 8);
+    code |= 0x20;
+  }
+
+  if (length & 0xff0000) {
+    opcodes.push((length & 0xff0000) >>> 16);
+    code |= 0x40;
+  }
+}
+
+function getMatchLength(source, sourcePos, target, targetPos) {
+  var rv = 0;
+
+  while (source[sourcePos++] === target[targetPos++]) rv++;
+
+  return rv;
+}
+
+// function used to split buffers into blocks(units for matching regions
+// in 'diffDelta')
+function sliceBlock(buffer, pos) {
+  var j = pos;
+
+  // advance until a block boundary is found
+  while (buffer[j] !== 10 && (j - pos < 90) && j < buffer.length) j++;
+
+  return buffer.slice(pos, j);
+}
+
+
+// gets sizes of the base buffer/target buffer formatted in LEB128 and
+// the delta header length
+function decodeHeader(buffer) {
+  var offset = 0;
+
+  function nextSize() {
+    var rv = buffer[offset]
+      , bits = 7;
+
+    while (buffer[offset++] & 0x80) {
+      rv |= (buffer[offset] & 0x7f) << bits;
+      bits += 7;
+    }
+
+    return rv;
+  }
+
+  return [nextSize(), nextSize(), offset];
+}
+
+function encodeHeader(opcodes, baseSize, targetSize) {
+
+  function encode(size) {
+    opcodes.push(size & 0x7f);
+    size >>>= 7;
+
+    while (size > 0) {
+      // this means size continues, set the MSB
+      opcodes[opcodes.length - 1] |= 0x80;
+      opcodes.push(size & 0x7f);
+      size >>>= 7;
+    }
+  }
+
+  encode(baseSize);
+  encode(targetSize);
+}
+
+exports.patchDelta = patchDelta;
+exports.diffDelta = diffDelta;
