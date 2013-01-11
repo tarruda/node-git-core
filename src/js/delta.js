@@ -62,23 +62,23 @@ function patchDelta(base, delta) {
 
 // produces a buffer that contains instructions on how to
 // construct 'target' from 'source' using copy/insert encoding.
-// based on the algorithm described in the paper
+// adapted on the algorithm described in the paper
 // 'File System Support for Delta Compression'.
 // key differences are:
-//  - No fingerprint function is used explicitly, instead we rely on
-//    javascript objects as hash tables (FIXME)
+//  - instead of using fingerprints as keys of the hash table,
+//    we use buffers and never clobber existing entries
 //  - The block size is variable and determined by linefeeds or
 //    chunk of 90 bytes whatever comes first
-//  - javascript objects only support string as keys, we
-//    use base64 encoding of buffer slices as the 'fingerprint' (FIXME)
-//  - this is slow and was added as a util for testing 'patchDelta', so it 
-//    should not be used indiscriminately
+//
+// this is slow and was added more as a utility for testing
+// 'patchDelta' and documenting git delta encoding, so it 
+// should not be used indiscriminately
 function diffDelta(source, target) {
   var block, matchOffset, matchLength, insertLength
     , i = 0
     , insertBuffer = new Buffer(127)
     , bufferedLength = 0
-    , blocks = {}
+    , blocks = new Blocks(1103)
     , opcodes = [];
 
   // first step is to encode the source and target sizes
@@ -87,7 +87,7 @@ function diffDelta(source, target) {
   // now build the hashtable containing the lines/blocks
   while (i < source.length) {
     block = sliceBlock(source, i);
-    blocks[block.toString('base64')] = i;
+    blocks.set(block, i);
     i += block.length;
   }
 
@@ -96,7 +96,7 @@ function diffDelta(source, target) {
   while (i < target.length) {
     block = sliceBlock(target, i); 
     matchLength = 0;
-    matchOffset = blocks[block.toString('base64')];
+    matchOffset = blocks.get(block);
     if (typeof matchOffset === 'number')
       // match found, find the length
       matchLength = getMatchLength(source, matchOffset, target, i);
@@ -139,6 +139,88 @@ function diffDelta(source, target) {
 
   return new Buffer(opcodes);
 }
+
+// hashtable where keys are Buffer instances
+function Blocks(n) {
+  this.array = new Array(n);
+  this.n = n;
+}
+
+Blocks.prototype.get = function(key) {
+  var hashValue = hash(key)
+    , idx = hashValue % this.n;
+
+  if (this.array[idx])
+    return this.array[idx].get(key);
+};
+
+Blocks.prototype.set = function(key, value) {
+  var hashValue = hash(key)
+    , idx = hashValue % this.n;
+
+  if (this.array[idx])
+    this.array[idx].set(key, value);
+  else
+    this.array[idx] = new Bucket(key, value);
+};
+
+function Bucket(key, value) {
+  this.key = key;
+  this.value = value;
+}
+
+function compareBuffers(a, b) {
+  var i = 0;
+
+  if (a.length !== b.length)
+    return false;
+
+  while (i < a.length && a[i] === b[i]) i++;
+
+  if (i !== a.length)
+    return false;
+
+  return true;
+}
+
+Bucket.prototype.get = function(key) {
+  var node = this;
+
+  while (node && !compareBuffers(node.key, key))
+    node = node.next;
+
+  if (node)
+    return node.value;
+};
+
+Bucket.prototype.set = function(key, value) {
+  var node = this;
+
+  while (!compareBuffers(node.key, key) && node.next)
+    node = node.next;
+
+  if (compareBuffers(node.key, key))
+    node.value = value;
+  else
+    node.next = new Bucket(key, value);
+};
+
+function hash(buffer) {
+  var w = 1 
+    , rv = 0
+    , i = 0
+    , j = buffer.length;
+
+  while (i < j) {
+    w *= 29;
+    w %= (1 << 30);
+    rv += buffer[i++] * w;
+    rv %= (1 << 30);
+  }
+
+  return rv;
+}
+
 
 // function used to split buffers into blocks(units for matching regions
 // in 'diffDelta')
