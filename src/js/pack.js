@@ -134,30 +134,30 @@ Pack.deserialize = function(buffer) {
 function encodePackEntrySize(size) {
   // this is an adaptation of LEB128: http://en.wikipedia.org/wiki/LEB128
   // with the difference that the first byte will contain type information
-  // in the first 3 data bits(the first bit is still a continuation flag)
-  var lastByte = size & 0x0f
-    , bytes = [lastByte]
-    , current = size >>> 4;
+  // in the first 3 data bits(the first bit is a continuation flag)
+  var rv = [size & 0xf];
+  size >>>= 4;
 
-  while (current > 0) {
+  while (size > 0) {
     // Set the most significant bit for the last processed byte to signal
     // that more 'size bytes' follow
-    bytes[bytes.length - 1] = lastByte | 0x80;
-    lastByte = current & 0x7f;
-    bytes.push(lastByte);
-    current = current >>> 7;
+    rv[rv.length - 1] |= 0x80;
+    rv.push(size & 0x7f);
+    size >>>= 7;
   }
 
-  return bytes;
+  return rv;
 }
 
 function decodePackEntryHeader(buffer, offset) {
-  var rv = buffer[offset] & 0x0f
-    , bits = 4;
+  var byte = buffer[offset++]
+    , rv = byte & 0xf
+    , shift = 4;
 
-  while (buffer[offset++] & 0x80) {
-    rv |= (buffer[offset] & 0x7f) << bits;
-    bits += 7;
+  while (byte & 0x80) {
+    byte = buffer[offset++];
+    rv |= (byte & 0x7f) << shift;
+    shift += 7;
   }
 
   return [rv, offset];

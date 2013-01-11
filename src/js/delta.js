@@ -255,41 +255,43 @@ function emitCopy(opcodes, source, offset, length) {
   opcodes[codeIdx] = code;
 }
 
+function encodeHeader(opcodes, baseSize, targetSize) {
+
+  function encode(size) {
+    opcodes.push(size & 0x7f);
+    size >>>= 7;
+
+    while (size > 0) {
+      opcodes[opcodes.length - 1] |= 0x80;
+      opcodes.push(size & 0x7f);
+      size >>>= 7;
+    }
+  }
+
+  encode(baseSize);
+  encode(targetSize);
+}
+
 // gets sizes of the base buffer/target buffer formatted in LEB128 and
 // the delta header length
 function decodeHeader(buffer) {
   var offset = 0;
 
   function nextSize() {
-    var byte
-      , rv = 0
-      , shift = 0;
+    var byte = buffer[offset++]
+      , rv = byte & 0x7f
+      , shift = 7;
 
-    do {
+    while (byte & 0x80) {
       byte = buffer[offset++];
       rv |= (byte & 0x7f) << shift;
       shift += 7;
-    } while (byte & 0x80);
+    }
 
     return rv;
   }
 
   return [nextSize(), nextSize(), offset];
-}
-
-function encodeHeader(opcodes, baseSize, targetSize) {
-
-  function encode(size) {
-    while (size >= 0x80) {
-      opcodes.push(size | 0x80);
-      size >>>= 7;
-    }
-
-    opcodes.push(size);
-  }
-
-  encode(baseSize);
-  encode(targetSize);
 }
 
 // hashtable where keys are Buffer instances and can store more than
