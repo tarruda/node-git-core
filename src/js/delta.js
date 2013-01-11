@@ -3,7 +3,6 @@
 var MIN_COPY_LENGTH = 4; // minimum match length for copy instruction
                         
 
-
 // produces a buffer that is the result of 'delta' applied to 'base'
 function patchDelta(base, delta) {
   var rv, opcode, baseOffset, copyLength
@@ -12,8 +11,11 @@ function patchDelta(base, delta) {
     , offset = header[2];
 
   // assert the size of the base buffer
-  if (header[0] !== base.length)
+  if (header[0] !== base.length) {
+    console.log(base.length)
+    console.log(header[0])
     throw new Error('Invalid base buffer length in header');
+  }
 
   // pre allocate buffer to hold the results
   rv = new Buffer(header[1]);
@@ -61,24 +63,31 @@ function patchDelta(base, delta) {
 }
 
 // produces a buffer that contains instructions on how to
-// construct 'target' from 'source' using copy/insert encoding.
-// adapted on the algorithm described in the paper
+// construct 'target' from 'source' using git copy/insert encoding.
+// adapted from the algorithm described in the paper
 // 'File System Support for Delta Compression'.
+//
 // key differences are:
-//  - instead of using fingerprints as keys of the hash table,
-//    we use buffers and never clobber existing entries
 //  - The block size is variable and determined by linefeeds or
 //    chunk of 90 bytes whatever comes first
+//  - instead of using fingerprints as keys of the hash table,
+//    we use buffers(existing hash values are not clobbered)
+//  - this algorithm focuses on more optimal compression by storing
+//    all offsets of a match(the hashtable can stores multiple
+//    values for a key) and choosing one of the biggest matches
+//    to copy from
+//  - the number of buckets in the hash table is pre-estimated by
+//    assuming an average line length of 17
 //
 // this is slow and was added more as a utility for testing
 // 'patchDelta' and documenting git delta encoding, so it 
 // should not be used indiscriminately
 function diffDelta(source, target) {
-  var block, matchOffset, matchLength, insertLength
+  var block, matchOffsets, match, insertLength
     , i = 0
     , insertBuffer = new Buffer(127)
     , bufferedLength = 0
-    , blocks = new Blocks(1103)
+    , blocks = new Blocks(Math.ceil(source.length / 17))
     , opcodes = [];
 
   // first step is to encode the source and target sizes
@@ -95,15 +104,15 @@ function diffDelta(source, target) {
   i = 0;
   while (i < target.length) {
     block = sliceBlock(target, i); 
-    matchLength = 0;
-    matchOffset = blocks.get(block);
-    if (typeof matchOffset === 'number')
-      // match found, find the length
-      matchLength = getMatchLength(source, matchOffset, target, i);
-    if (matchLength < MIN_COPY_LENGTH) {
+    match = null;
+    matchOffsets = blocks.get(block);
+    if (matchOffsets)
+      // choose the biggest match
+      match = chooseMatch(source, matchOffsets, target, i);
+    if (!match || match.length < MIN_COPY_LENGTH) {
       // this will happen when a match is not found or it is too short
       // either way we will insert or buffer data
-      insertLength = block.length + matchLength;
+      insertLength = block.length + (match ? match.length : 0);
       if (bufferedLength + insertLength <= insertBuffer.length) {
         // buffer as much data as permitted(127)
         target.copy(insertBuffer, bufferedLength, i, i + insertLength);
@@ -122,8 +131,8 @@ function diffDelta(source, target) {
         emitInsert(opcodes, insertBuffer, bufferedLength);
         bufferedLength = 0;
       }
-      emitCopy(opcodes, source, matchOffset, matchLength);
-      i += matchLength;
+      emitCopy(opcodes, source, match.offset, match.length);
+      i += match.length;
     }
   }
 
@@ -140,88 +149,6 @@ function diffDelta(source, target) {
   return new Buffer(opcodes);
 }
 
-// hashtable where keys are Buffer instances
-function Blocks(n) {
-  this.array = new Array(n);
-  this.n = n;
-}
-
-Blocks.prototype.get = function(key) {
-  var hashValue = hash(key)
-    , idx = hashValue % this.n;
-
-  if (this.array[idx])
-    return this.array[idx].get(key);
-};
-
-Blocks.prototype.set = function(key, value) {
-  var hashValue = hash(key)
-    , idx = hashValue % this.n;
-
-  if (this.array[idx])
-    this.array[idx].set(key, value);
-  else
-    this.array[idx] = new Bucket(key, value);
-};
-
-function Bucket(key, value) {
-  this.key = key;
-  this.value = value;
-}
-
-function compareBuffers(a, b) {
-  var i = 0;
-
-  if (a.length !== b.length)
-    return false;
-
-  while (i < a.length && a[i] === b[i]) i++;
-
-  if (i !== a.length)
-    return false;
-
-  return true;
-}
-
-Bucket.prototype.get = function(key) {
-  var node = this;
-
-  while (node && !compareBuffers(node.key, key))
-    node = node.next;
-
-  if (node)
-    return node.value;
-};
-
-Bucket.prototype.set = function(key, value) {
-  var node = this;
-
-  while (!compareBuffers(node.key, key) && node.next)
-    node = node.next;
-
-  if (compareBuffers(node.key, key))
-    node.value = value;
-  else
-    node.next = new Bucket(key, value);
-};
-
-function hash(buffer) {
-  var w = 1 
-    , rv = 0
-    , i = 0
-    , j = buffer.length;
-
-  while (i < j) {
-    w *= 29;
-    w %= (1 << 30);
-    rv += buffer[i++] * w;
-    rv %= (1 << 30);
-  }
-
-  return rv;
-}
-
-
 // function used to split buffers into blocks(units for matching regions
 // in 'diffDelta')
 function sliceBlock(buffer, pos) {
@@ -234,6 +161,35 @@ function sliceBlock(buffer, pos) {
   return buffer.slice(pos, j);
 }
 
+// given a list of match offsets, this will choose the biggest one
+function chooseMatch(source, sourcePositions, target, targetPos) {
+  var i, len, spos, tpos, rv;
+
+  for (i = 0;i < sourcePositions.length;i++) {
+    len = 0;
+    spos = sourcePositions[i];
+    tpos = targetPos;
+    if (rv && spos < (rv.offset + rv.length))
+      // this offset is contained in a previous match
+      continue;
+    while (source[spos++] === target[tpos]) {
+      len++;
+      tpos++;
+    }
+    if (!rv) {
+      rv = {length: len, offset: sourcePositions[i]};
+    } else if (rv.length < len) {
+      rv.length = len;
+      rv.offset = sourcePositions[i];
+    }
+    if (rv.length > Math.floor(source.length / 5))
+      // don't try to find a match that is bigger than one fifth of
+      // the source buffer
+      break;
+  }
+
+  return rv;
+}
 
 // the insert instruction is just the number of bytes to copy from 
 // delta buffer(following the opcode) to target buffer.
@@ -299,28 +255,21 @@ function emitCopy(opcodes, source, offset, length) {
   opcodes[codeIdx] = code;
 }
 
-function getMatchLength(source, sourcePos, target, targetPos) {
-  var rv = 0;
-
-  while (source[sourcePos++] === target[targetPos++]) rv++;
-
-  return rv;
-}
-
-
 // gets sizes of the base buffer/target buffer formatted in LEB128 and
 // the delta header length
 function decodeHeader(buffer) {
   var offset = 0;
 
   function nextSize() {
-    var rv = buffer[offset]
-      , bits = 7;
+    var byte
+      , rv = 0
+      , shift = 0;
 
-    while (buffer[offset++] & 0x80) {
-      rv |= (buffer[offset] & 0x7f) << bits;
-      bits += 7;
-    }
+    do {
+      byte = buffer[offset++];
+      rv |= (byte & 0x7f) << shift;
+      shift += 7;
+    } while (byte & 0x80);
 
     return rv;
   }
@@ -331,20 +280,100 @@ function decodeHeader(buffer) {
 function encodeHeader(opcodes, baseSize, targetSize) {
 
   function encode(size) {
-    opcodes.push(size & 0x7f);
-    size >>>= 7;
-
-    while (size > 0) {
-      // this means size continues, set the MSB
-      opcodes[opcodes.length - 1] |= 0x80;
-      opcodes.push(size & 0x7f);
+    while (size >= 0x80) {
+      opcodes.push(size | 0x80);
       size >>>= 7;
     }
+
+    opcodes.push(size);
   }
 
   encode(baseSize);
   encode(targetSize);
 }
+
+// hashtable where keys are Buffer instances and can store more than
+// one value per key(since blocks can be repeated in text)
+function Blocks(n) {
+  this.array = new Array(n);
+  this.n = n;
+}
+
+Blocks.prototype.get = function(key) {
+  var hashValue = hash(key)
+    , idx = hashValue % this.n;
+
+  if (this.array[idx])
+    return this.array[idx].get(key);
+};
+
+Blocks.prototype.set = function(key, value) {
+  var hashValue = hash(key)
+    , idx = hashValue % this.n;
+
+  if (this.array[idx])
+    this.array[idx].set(key, value);
+  else
+    this.array[idx] = new Bucket(key, value);
+};
+
+function Bucket(key, value) {
+  this.key = key;
+  this.value = [value];
+}
+
+function compareBuffers(a, b) {
+  var i = 0;
+
+  if (a.length !== b.length)
+    return false;
+
+  while (i < a.length && a[i] === b[i]) i++;
+
+  if (i < a.length)
+    return false;
+
+  return true;
+}
+
+Bucket.prototype.get = function(key) {
+  var node = this;
+
+  while (node && !compareBuffers(node.key, key))
+    node = node.next;
+
+  if (node)
+    return node.value;
+};
+
+Bucket.prototype.set = function(key, value) {
+  var node = this;
+
+  while (!compareBuffers(node.key, key) && node.next)
+    node = node.next;
+
+  if (compareBuffers(node.key, key))
+    node.value.push(value); // this represents more occurences of the pattern
+  else
+    node.next = new Bucket(key, value);
+};
+
+function hash(buffer) {
+  var w = 1 
+    , rv = 0
+    , i = 0
+    , j = buffer.length;
+
+  while (i < j) {
+    w *= 29;
+    w %= (1 << 30);
+    rv += buffer[i++] * w;
+    rv %= (1 << 30);
+  }
+
+  return rv;
+}
+
 
 exports.patchDelta = patchDelta;
 exports.diffDelta = diffDelta;

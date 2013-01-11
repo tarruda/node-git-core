@@ -216,16 +216,16 @@ suite 'delta encoding/decoding', ->
     # 3 - insert 'ab'
     # which encodes to hex values each section being an opcode sequence:
     # ----
-    # 23 24 (header)
+    # 23  24 (header sizes)
     # ----
-    # 91 = 80(copy) | 01(17 offset) | 10(17 length)
-    # 11 = 17 length
-    # 11 = 17 length
-    # ----
-    # 90 = 80(copy) | 10(17 length)
+    # 91 = 80(copy) | 01(next byte) offset | 10(next byte) length
+    # 11 = 17 offset
     # 11 = 17 length
     # ----
-    # 02 = (insert next two bytes)
+    # 90 = 80(copy) | 10(next byte) length
+    # 11 = 17 length
+    # ----
+    # 02 = (insert) the next two bytes
     # 61 62 = a b
     expect(delta.toString('hex')).to.equal('23249111119011026162')
     patched = patchDelta a, delta
@@ -262,17 +262,21 @@ suite 'delta encoding/decoding', ->
     # 3 - copy 7 bytes from offset 25
     # 4 - insert 'h'
     # which encodes to:
-    # 35 2d = (header)
+    # 35  2d = (header sizes)
     # ----
-    # 90 = 80(copy) | 10(11 length) ( it matches |some words\nw|ords )
+    # 90 = 80(copy) | 10(next byte) length (matches "some words\nw"ords)
     # 0b = 11 length
-    # 05 = (insert the next 5 bytes)
+    # ----
+    # 05 = (insert) the next 5 bytes
     # 6f 72 64 73 0a = o r d s \n
-    # 91 = 80(copy) | 01(26 offset) | 10(18 length)
+    # ----
+    # 91 = 80(copy) | 01(next byte) offset | 10(next byte) length
     # 1a = 26 offset
     # 15 = 21 length (abcdef\nghijkl\nmnopqr\n)
-    # 08 = (insert the next 8 bytes)
+    # ----
+    # 08 = (insert) next 8 bytes
     # 62 61 0a 72 73 74 0a 68 = b a \n r s t \n h
+    #
     # observation:
     # while it might seem that the 'rst' substring should match,
     # notice that in the first buffer it actually is 'rst\n'
@@ -280,3 +284,37 @@ suite 'delta encoding/decoding', ->
     expect(delta.toString 'hex').to.equal(
       '352d900b056f7264730a911a150862610a7273740a68')
     expect(patched.toString 'hex').to.equal b.toString 'hex'
+
+  test 'encode/decode binary data', ->
+    a = new Buffer 1 << 14 # 16384 
+    a.fill 200
+    b = new Buffer (1 << 13) - 10 # 8182
+    b.fill 200
+    c = new Buffer 10
+    c.fill 199
+    d = new Buffer 1 << 13 # 8192
+    d.fill 200
+    d = Buffer.concat [b, c, d]
+    delta = diffDelta a, d
+    # the expected instructions to produce 'd' from 'a' are:
+    # 1 - copy 8182 bytes from offset 0
+    # 2 - insert c7(199) 10 times and c8(200) 80 times(block size is 90)
+    # 3 - copy 8112 bytes from offset 0
+    # which encodes to:
+    # 80 80 01  80 80 01 (header sizes)
+    # ----
+    # b0 = 80(copy) | 10(next byte) length | 20(next byte << 8) length
+    # f6 = 246 length
+    # 1f = (31 << 8) length (246 + (31 << 8)) == 8182
+    # ----
+    # 5a = (insert) next 90 bytes
+    # c7 (10 times) c8 (80 times)
+    # ----
+    # b0 = 80(copy) | 10(next byte) length | 20(next byte << 8) length
+    # b0 = 176 length
+    # 1f = (31 << 8) length (176 + (31 << 8)) == 8112
+    # ----
+    # 8182 + 90 + 8112 = 16384
+    patched = patchDelta a, delta
+    expect(patched.toString 'hex').to.equal d.toString 'hex'
+
