@@ -37,7 +37,8 @@ Pack.prototype.serialize = function() {
     , hash = crypto.createHash('sha1')
     , contentArray = []
     , processedById = {}
-    , processedBySha1 = {};
+    , processedBySha1 = {}
+    , processedDeltas = {};
 
   // serialize all the objects
   for (var i = 0; i < this.objects.length; i++) {
@@ -45,6 +46,9 @@ Pack.prototype.serialize = function() {
     if (object._id in processedById)
       continue;
     object.serialize(function(serialized) {
+      var type = serialized.getType();
+
+      if (type === 'delta')
       processedById[this._id] = serialized;
       if (!(serialized.getHash() in processedBySha1))
         // avoid occurences with different id but same sha1
@@ -84,10 +88,10 @@ Pack.prototype.serialize = function() {
   return Buffer.concat(contentArray);
 }
 
-Pack.deserialize = function(buffer) {
+Pack.deserialize = function(buffer, resolveBase) {
   var i, count, objPos, pos, type, entryHeader, inflatedEntry, inflatedData
     , ofsDeltaHeader, base, baseOffset, baseId, patchedData, pendingDelta
-    , deserialized, k, size
+    , deserialized, k, size, keys, serialized
     , hash = crypto.createHash('sha1')
     , objectsById = {} // used after parsing objects to connect references
     , baseByOffset = {} // used for resolving deltas by offset
@@ -98,7 +102,7 @@ Pack.deserialize = function(buffer) {
 
   // helpers to to call when adding a deserialized object
   function addObject(data, type, objPos) {
-    var pendingDelta
+    var pendingDeltas, pendingDelta, i
       , obj = {data: data, type: type}
       , deserialized = type.cls.deserialize(data)
       , objId = deserialized[1];
@@ -109,9 +113,21 @@ Pack.deserialize = function(buffer) {
     rv.objects.push(deserialized[0]);
 
     // resolve/add pending deltas that were waiting for this object
-    if ((pendingDelta = pendingByOffset[objPos]) || 
-        (pendingDelta = pendingById[objId]))
-      addDelta(pendingDelta.data, obj, pendingDelta.offset);
+    if (pendingDeltas = pendingByOffset[objPos]) {
+      for (i = 0;i < pendingDeltas.length;i++) {
+        pendingDelta = pendingDeltas[i];
+        addDelta(pendingDelta.data, obj, pendingDelta.offset);
+      }
+      delete pendingByOffset[objPos];
+    }
+
+    if (pendingDeltas = pendingById[objId]) {
+      for (i = 0;i < pendingDeltas.length;i++) {
+        pendingDelta = pendingDeltas[i];
+        addDelta(pendingDelta.data, obj, pendingDelta.offset);
+      }
+      delete pendingById[objId];
+    }
   }
 
   // resolve/add an object in delta form
@@ -159,7 +175,10 @@ Pack.deserialize = function(buffer) {
         if (!base) {
           // I think this can only happen on thin packs which are not
           // supported yet
-          pendingByOffset[baseOffset] = {data: inflatedData, offset: objPos};
+          if (!pendingByOffset[baseOffset])
+            pendingByOffset[baseOffset] = [];
+          pendingByOffset[baseOffset].push(
+            {data: inflatedData, offset: objPos});
           continue;
         }
         addDelta(inflatedData, base, objPos);
@@ -172,7 +191,9 @@ Pack.deserialize = function(buffer) {
         pos += inflatedEntry[1];
         base = baseById[baseId];
         if (!base) {
-          pendingById[baseId] = {data: inflatedData, offset: objPos};
+          if (!pendingById[baseId])
+            pendingById[baseId] = [];
+          pendingById[baseId].push({data: inflatedData, offset: objPos});
           continue;
         }
         addDelta(inflatedData, base, objPos);
@@ -185,12 +206,32 @@ Pack.deserialize = function(buffer) {
   if (hash.digest('hex') !== buffer.slice(pos, pos + 20).toString('hex'))
     throw new Error('Invalid pack checksum')
 
-  // check that all deltas were resolved
-  // TODO hook support for thin packs here
-  if (Object.keys(pendingByOffset).length || Object.keys(pendingById).length)
+  // ask the caller for base objects for pending deltas(thin pack)
+  keys = Object.keys(pendingById);
+  while (keys.length) {
+    if (typeof resolveBase !== 'function')
+      throw new Error('Cannot deserialize thin pack without second argument');
+    k = keys.shift();
+    base = resolveBase(k);
+    serialized = base.serialize();
+    if (serialized.getHash() !== k)
+      throw new Error('Invalid base object for delta decoding');
+    type = types[codes[serialized.getType()]];
+    i = rv.objects.length;
+    // add it temporarily
+    addObject(serialized.getPackData(), type, -1);
+    // all objects that were depending on this should now have been added
+    // so now we remove it from the pack
+    rv.objects.splice(i, 1);
+    // also, recreate the 'keys' array
+    keys = Object.keys(pendingById);
+  }
+
+  if (Object.keys(pendingByOffset).length)
+    // no pending deltas can exist at this point
     throw new Error('Some deltas could not be resolved');
 
-  // connect the objects
+  // connect the object graph
   for (k in objectsById) {
     objectsById[k].resolveReferences(objectsById);
   }

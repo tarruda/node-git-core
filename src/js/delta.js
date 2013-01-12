@@ -218,6 +218,8 @@ function emitCopy(opcodes, source, offset, length) {
   code = 0x80 // set the MSB
 
   // offset and length are written using a compact encoding
+  // where the state of 7 lower bits specify the meaning of
+  // the bytes that follow
   if (offset & 0xff) {
     opcodes.push(offset & 0xff);
     code |= 0x01;

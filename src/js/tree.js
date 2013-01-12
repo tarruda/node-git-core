@@ -8,6 +8,7 @@ function Tree(children) {
 }
 util.inherits(Tree, common.GitObject);
 
+// TODO add API to support file modes
 Tree.prototype.serialize = function(visitor) {
   var key, value, serialized, i, type, hash
     , contentArray = []
