@@ -33,27 +33,33 @@ function Pack(objects) {
 // https://raw.github.com/git/git/master/Documentation/technical/pack-heuristics.txt
 Pack.prototype.serialize = function() {
   var key, object, serialized, header, typeBits, data, encodedHeader
-    , packContent, encodedHeaderBytes, deflated, checksum
+    , packContent, encodedHeaderBytes, deflated, checksum, i, d, offset
+    , source, encodedDeltaHeader, tData
     , hash = crypto.createHash('sha1')
     , contentArray = []
     , processedById = {}
     , processedBySha1 = {}
-    , processedDeltas = {};
+    , offsets = {}
+    , deltas = [];
 
   // serialize all the objects
   for (var i = 0; i < this.objects.length; i++) {
     object = this.objects[i];
     if (object._id in processedById)
       continue;
-    object.serialize(function(serialized) {
-      var type = serialized.getType();
-
-      if (type === 'delta')
-      processedById[this._id] = serialized;
-      if (!(serialized.getHash() in processedBySha1))
-        // avoid occurences with different id but same sha1
-        processedBySha1[serialized.getHash()] = serialized;
-    });
+    if (object instanceof delta.Delta) {
+      deltas.push(object);  
+    } else {
+      object.serialize(function(serialized) {
+        processedById[this._id] = serialized;
+        if (!(serialized.getHash() in processedBySha1))
+          // avoid occurences with different id but same sha1
+          processedBySha1[serialized.getHash()] = {
+              serialized: serialized
+            , id: this._id
+          };
+      });
+    }
   }
 
   // calculate the packfile header
@@ -63,10 +69,11 @@ Pack.prototype.serialize = function() {
   header.writeUInt32BE(Object.keys(processedBySha1).length, 8);
   contentArray.push(header);
   hash.update(header);
+  offset = 12;
 
-  // start packing objects
+  // pack objects
   for (key in processedBySha1) {
-    serialized = processedBySha1[key];
+    serialized = processedBySha1[key].serialized;
     // calculate the object header
     typeBits = codes[serialized.getType()].code << 4;
     // the header is only used for loose objects. in packfiles they
@@ -80,6 +87,50 @@ Pack.prototype.serialize = function() {
     contentArray.push(deflated);
     hash.update(encodedHeader);
     hash.update(deflated);
+    offsets[processedBySha1[key].id] = {
+        offset: offset
+      , data: data
+    };
+    offset += encodedHeader.length + deflated.length;
+  }
+
+  // calculate and pack deltas
+  for (i = 0;i < deltas.length;i++) {
+    d = deltas[i];
+    source = offsets[d.source._id];
+    tData = d.target.serialize().getPackData();
+    if (source) {
+      // base object in pack, calculate OFS_DELTA is the relative offset
+      // from base
+      encodedDeltaHeader = new Buffer(encodeOfsDeltsHeader
+                                    (-(source.offset - offset)));
+      data = delta.diff(source.data, tData);
+      encodedHeaderBytes = encodePackEntrySize(data.length);
+      encodedHeaderBytes[0] = encodedHeaderBytes[0] | (6 << 4);
+      encodedHeader = new Buffer(encodedHeaderBytes);
+    } else {
+      // base object will not be included in the pack, REF_DELTA
+      // header is the sha1 of the base object
+      serialized = d.source.serialize();
+      encodedDeltaHeader = new Buffer(serialized.getHash(), 'hex');
+      data = delta.diff(serialized.getPackData(), tData);
+      encodedHeaderBytes = encodePackEntrySize(data.length);
+      encodedHeaderBytes[0] = encodedHeaderBytes[0] | (7 << 4);
+    }
+    encodedHeader = new Buffer(encodedHeaderBytes);
+    deflated = zlib.deflate(data);
+    contentArray.push(encodedHeader);
+    contentArray.push(encodedDeltaHeader);
+    contentArray.push(deflated);
+    hash.update(encodedHeader);
+    hash.update(encodedDeltaHeader);
+    hash.update(deflated);
+    offsets[d.target._id] = {
+        offset: offset
+      , data: tData
+    };
+    offset += encodedHeader.length + encodedDeltaHeader.length +
+      deflated.length;
   }
 
   // append the trailing checksum
@@ -269,6 +320,17 @@ function decodePackEntryHeader(buffer, offset) {
   }
 
   return [rv, offset];
+}
+
+function encodeOfsDeltsHeader(relativeOffset) {
+  var rv = [relativeOffset & 0x7f];
+
+  while (relativeOffset >>>= 7) {
+    relativeOffset--;
+    rv.unshift(0x80 | relativeOffset & 0x7f);
+  }
+
+  return rv;
 }
 
 function decodeOfsDeltaHeader(buffer, offset) {

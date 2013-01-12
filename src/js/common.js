@@ -1,4 +1,5 @@
 var crypto = require('crypto')
+  , delta = require('./delta')
   , id = 0
   , NULL = new Buffer([0]);
 
@@ -111,6 +112,13 @@ GitObject.prototype._serialize = function(content, visitor){
 };
 
 GitObject.prototype.resolveReferences = function(objectPool) { };
+
+GitObject.prototype.diff = function(other) {
+  if (this.constructor !== other.constructor)
+    throw new Error('Can only create deltas from objects of the same type');
+
+  return new Delta(this, other);
+};
 
 GitObject.getObjectInfo = function(type, contents) {
   var rv, header, hash, match

@@ -385,5 +385,11 @@ function compareBuffers(a, b) {
   return true;
 }
 
+function Delta(source, target) {
+  this.source = source;
+  this.target = target;
+}
+
 exports.patch = patchDelta;
 exports.diff = diffDelta;
+exports.Delta = Delta;
