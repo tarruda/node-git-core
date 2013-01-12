@@ -1,7 +1,7 @@
 ### node-git-core
 
 Library that provides simple object-oriented api for working with git data at a
-lower level:
+lower level, see [git internals](http://git-scm.com/book/en/Git-Internals) for more info:
 
 #### Installation
 ```sh
@@ -100,8 +100,9 @@ serializedPack = pack.serialize(); // this is a git packfile
 // automatically when serializing
 ```
 
-This library is all about working with git data in-memory, above is an example
-on how git objects can be created, connected and serialized, but the inverse
+This library is all about working with git data in-memory, no repositories are
+needed. Above is an example
+on how git objects can be created, connected and serialized, the inverse
 is also supported:
 
 ```js
@@ -151,4 +152,3 @@ pack = new Pack([
 ]);
 pack.serialize();
 ```
-
