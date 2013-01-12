@@ -28,23 +28,27 @@ function Pack(objects) {
   this.objects = objects || [];
 }
 
-// FIXME this class does not currently applies delta compression to 
-// similar objects in the pack, so it is mostly useful for sending
-// small amounts of git objects to a remote repository
+// TODO this class does not currently applies delta compression to 
+// similar objects in the pack. Implement according to info found at:
+// https://raw.github.com/git/git/master/Documentation/technical/pack-heuristics.txt
 Pack.prototype.serialize = function() {
   var key, object, serialized, header, typeBits, data, encodedHeader
     , packContent, encodedHeaderBytes, deflated, checksum
     , hash = crypto.createHash('sha1')
     , contentArray = []
-    , processed = {};
+    , processedById = {}
+    , processedBySha1 = {};
 
   // serialize all the objects
   for (var i = 0; i < this.objects.length; i++) {
     object = this.objects[i];
-    if (object._id in processed)
+    if (object._id in processedById)
       continue;
     object.serialize(function(serialized) {
-      processed[this._id] = serialized;
+      processedById[this._id] = serialized;
+      if (!(serialized.getHash() in processedBySha1))
+        // avoid occurences with different id but same sha1
+        processedBySha1[serialized.getHash()] = serialized;
     });
   }
 
@@ -52,13 +56,13 @@ Pack.prototype.serialize = function() {
   header = new Buffer(12);
   header.write(MAGIC);
   header.writeUInt32BE(2, 4);
-  header.writeUInt32BE(Object.keys(processed).length, 8);
+  header.writeUInt32BE(Object.keys(processedBySha1).length, 8);
   contentArray.push(header);
   hash.update(header);
 
   // start packing objects
-  for (key in processed) {
-    serialized = processed[key];
+  for (key in processedBySha1) {
+    serialized = processedBySha1[key];
     // calculate the object header
     typeBits = codes[serialized.getType()].code << 4;
     // the header is only used for loose objects. in packfiles they
@@ -153,6 +157,8 @@ Pack.deserialize = function(buffer) {
         baseOffset = objPos - ofsDeltaHeader[0];
         base = baseByOffset[baseOffset];
         if (!base) {
+          // I think this can only happen on thin packs which are not
+          // supported yet
           pendingByOffset[baseOffset] = {data: inflatedData, offset: objPos};
           continue;
         }
