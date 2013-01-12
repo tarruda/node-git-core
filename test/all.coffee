@@ -66,6 +66,7 @@ testObjects = ->
   d1 = new Date 1000000000
   d2 = new Date 2000000000
   d3 = new Date 3000000000
+  d4 = new Date 4000000000
   str = ''
   for i in [0...1000]
     str += 'test content/test content2/test content3\n'
@@ -84,11 +85,45 @@ testObjects = ->
   @t3 = new Tree {
     'another-file.txt': @b1
   }
-  author = 'Git User <user@domain.com>'
-  @c1 = new Commit @t1, author, null, d1, "Artificial commit 1"
-  @c2 = new Commit @t2, author, null, d2, "Artificial commit 2", [@c1]
-  @c3 = new Commit @t3, author, null, d3, "Artificial commit 3", [@c2]
-  @tag = new Tag @c2, 'v0.0.1', author, d2, 'Tag second commit'
+  @c1 = new Commit {
+    tree: @t1
+    author:
+      name: 'Git Author'
+      email: 'author@git.com'
+      date: d1
+    message: 'Artificial commit 1'
+  }
+  @c2 = new Commit {
+    tree: @t2
+    author:
+      name: 'Git Author'
+      email: 'author@git.com'
+      date: d2
+    message: 'Artificial commit 2'
+    parents: [@c1]
+  }
+  @c3 = new Commit {
+    tree: @t3
+    author:
+      name: 'Git User'
+      email: 'user@domain.com'
+      date: d3
+    committer:
+      name: 'Git Commiter'
+      email: 'committer@git.com'
+      date: d4
+    message: 'Artificial commit 3'
+    parents: [@c2]
+  }
+  @tag = new Tag {
+    object: @c2
+    name: 'v0.0.1'
+    tagger:
+      name: 'Git Tagger'
+      email: 'tagger@git.com'
+    date: d2
+    message: 'Tag second commit'
+  }
 
 suite 'object serialization/deserialization', ->
 
@@ -115,8 +150,7 @@ suite 'object serialization/deserialization', ->
     serialized = @c2.serialize()
     [commit, hash] = Commit.deserialize serialized.getData()
     expect(commit.tree).to.equal @t2.serialize().getHash()
-    expect(commit.author).to.equal @c2.author
-    expect(commit.date.getTime()).to.equal @c2.date.getTime()
+    expect(commit.author).to.deep.equal @c2.author
     expect(commit.parents[0]).to.equal @c1.serialize().getHash()
     expect(commit.message).to.equal @c2.message
     expect(hash).to.equal serialized.getHash()
@@ -127,7 +161,7 @@ suite 'object serialization/deserialization', ->
     expect(tag.object).to.equal @c2.serialize().getHash()
     expect(tag.type).to.equal 'commit'
     expect(tag.name).to.equal @tag.name
-    expect(tag.tagger).to.equal @tag.tagger
+    expect(tag.tagger).to.deep.equal @tag.tagger
     expect(tag.date.getTime()).to.equal @tag.date.getTime()
     expect(tag.message).to.equal @tag.message
     expect(hash).to.equal serialized.getHash()

@@ -2,38 +2,43 @@ var util = require('util')
   , common = require('./common');
 
 
-function Commit(tree, author, committer, date, message, parents) {
+function Commit(options) {
   this.constructor.super_.call(this);
-  this.tree = tree;
-  this.author = author;
-  this.committer = committer;
-  this.date = date;
-  this.message = message;
-  this.parents = parents || [];
+  if (options) {
+    this.tree = options.tree;
+    this.author = options.author;
+    this.committer = options.committer;
+    this.message = options.message;
+    this.parents = options.parents;
+  }
 }
 util.inherits(Commit, common.GitObject);
 
 Commit.prototype.serialize = function(visitor) {
   var i, parent, serialized
-    , ts = common.timestamp(this.date)
     , contentArray = [];
 
   serialized = this.tree.serialize(visitor);
   contentArray.push('tree ' + serialized.getHash());
 
-  for (i = 0; i < this.parents.length; i++) {
-    parent = this.parents[i];
-    if (typeof parent === 'string') {
-      contentArray.push('parent ' + parent);
-    } else if (parent instanceof Commit) {
-      serialized = parent.serialize(visitor);
-      contentArray.push('parent ' + serialized.getHash());
+  if (this.parents)
+    for (i = 0; i < this.parents.length; i++) {
+      parent = this.parents[i];
+      if (typeof parent === 'string') {
+        contentArray.push('parent ' + parent);
+      } else if (parent instanceof Commit) {
+        serialized = parent.serialize(visitor);
+        contentArray.push('parent ' + serialized.getHash());
+      }
     }
-  }
 
-  contentArray.push("author " + this.author + " " + ts);
+  contentArray.push("author " + this.author.name + " <" +
+                   (this.author.email || '') + "> " +
+                   common.timestamp(this.author.date));
   if (!this.committer) this.committer = this.author;
-  contentArray.push("committer " + this.committer + " " + ts);
+  contentArray.push("committer " + this.committer.name + " <" +
+                   (this.committer.email || '') + "> " +
+                   common.timestamp(this.committer.date));
   contentArray.push('\n');
   contentArray.push(this.message);
 
@@ -45,8 +50,9 @@ Commit.prototype.resolveReferences = function(objectPool) {
 
   this.tree = objectPool[this.tree] || this.tree;
 
-  for (i = 0;i < this.parents.length;i++)
-    this.parents[i] = objectPool[this.parents[i]] || this.parents[i];
+  if (this.parents)
+    for (i = 0;i < this.parents.length;i++)
+      this.parents[i] = objectPool[this.parents[i]] || this.parents[i];
 };
 
 Commit.deserialize = function(contents) {
@@ -69,28 +75,40 @@ Commit.deserialize = function(contents) {
   }
 
   // author
-  match = /^author\s(.+\s<.*>)\s(.+)$/.exec(info.contents.slice(
+  match = /^author\s(.+)\s<(.*)>\s(.+)$/.exec(info.contents.slice(
     pos, common.findLinefeed(info.contents, pos)).toString('utf8'));
   if (!match)
     throw new Error('commit missing author');
-  author = match[1];
-  date = common.parseDate(match[2]);
+  author = {
+      name: match[1]
+    , email: match[2]
+    , date: common.parseDate(match[3])
+  }
   pos += Buffer.byteLength(match[0]) + 1;
 
   // committer
-  // FIXME ignoring commit date
-  match = /^committer\s(.+\s<.*>)\s(?:.+)$/.exec(info.contents.slice(
+  match = /^committer\s(.+)\s<(.*)>\s(.+)$/.exec(info.contents.slice(
     pos, common.findLinefeed(info.contents, pos)).toString('utf8'));
   if (!match)
     throw new Error('commit missing committer');
-  committer = match[1];
+  committer = {
+      name: match[1]
+    , email: match[2]
+    , date: common.parseDate(match[3])
+  }
   pos += Buffer.byteLength(match[0]) + 3;
 
   // message
   message = info.contents.slice(pos).toString('utf8');
 
   return [
-      new Commit(tree, author, committer, date, message, parents)
+      new Commit({
+          tree: tree
+        , author: author
+        , committer: committer
+        , message: message
+        , parents: parents
+      })
     , info.hash
   ];
 };

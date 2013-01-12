@@ -5,20 +5,21 @@ var util = require('util')
   , Blob = require('./blob');
 
 
-function Tag(object, name, tagger, date, message, type) {
+function Tag(options) {
   this.constructor.super_.call(this);
-  this.object = object;
-  this.name = name;
-  this.tagger = tagger;
-  this.date = date;
-  this.message = message;
-  this.type = type;
+  if (options) {
+    this.object = options.object;
+    this.name = options.name;
+    this.tagger = options.tagger;
+    this.date = options.date;
+    this.message = options.message;
+    this.type = options.type;
+  }
 }
 util.inherits(Tag, common.GitObject);
 
 Tag.prototype.serialize = function(visitor) {
   var serialized
-    , ts = common.timestamp(this.date)
     , contentArray = [];
 
   if (typeof this.object === 'string') {
@@ -31,7 +32,9 @@ Tag.prototype.serialize = function(visitor) {
   }
 
   contentArray.push("tag " + this.name);
-  contentArray.push("tagger " + this.tagger + " " + ts);
+  contentArray.push("tagger " + this.tagger.name + " <" +
+                   (this.tagger.email || '') + "> " +
+                   common.timestamp(this.date));
   contentArray.push('\n');
   contentArray.push(this.message);
 
@@ -71,19 +74,29 @@ Tag.deserialize = function(contents) {
   pos += Buffer.byteLength(match[0]) + 1;
 
   // tagger
-  match = /^tagger\s(.+\s<.*>)\s(.+)$/.exec(info.contents.slice(
+  match = /^tagger\s(.+)\s<(.*)>\s(.+)$/.exec(info.contents.slice(
     pos, common.findLinefeed(info.contents, pos)).toString('utf8'));
   if (!match)
     throw new Error('tag missing tagger');
-  tagger = match[1];
-  date = common.parseDate(match[2]);
+  tagger = {
+      name: match[1]
+    , email: match[2]
+  };
+  date = common.parseDate(match[3]);
   pos += Buffer.byteLength(match[0]) + 3;
 
   // message
   message = info.contents.slice(pos).toString('utf8');
 
   return [
-      new Tag(object, tag, tagger, date, message, type)
+      new Tag({
+          object: object
+        , type: type
+        , name: tag
+        , tagger: tagger
+        , date: date
+        , message: message
+      })
     , info.hash
   ];
 };
