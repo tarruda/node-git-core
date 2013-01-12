@@ -88,21 +88,44 @@ Pack.deserialize = function(buffer) {
     , objectsById = {} // used after parsing objects to connect references
     , baseByOffset = {} // used for resolving deltas by offset
     , baseById = {} // used for resolving deltas by reference
-    , pendingDeltas = [] // what can't be resolved is stored here
+    , pendingByOffset = {}
+    , pendingById = {}
     , rv = new Pack(); 
+
+  // helpers to to call when adding a deserialized object
+  function addObject(data, type, objPos) {
+    var pendingDelta
+      , obj = {data: data, type: type}
+      , deserialized = type.cls.deserialize(data)
+      , objId = deserialized[1];
+      
+    objectsById[objId] = deserialized[0];
+    baseById[objId] = obj;
+    baseByOffset[objPos] = obj;
+    rv.objects.push(deserialized[0]);
+
+    // resolve/add pending deltas that were waiting for this object
+    if ((pendingDelta = pendingByOffset[objPos]) || 
+        (pendingDelta = pendingById[objId]))
+      addDelta(pendingDelta.data, obj, pendingDelta.offset);
+  }
+
+  // resolve/add an object in delta form
+  function addDelta(deltaData, base, objPos) {
+    var patchedData = delta.patch(base.data, deltaData);
+
+    addObject(patchedData, base.type, objPos);
+  }
 
   // verify magic number
   if (buffer.slice(0, 4).toString('utf8') !== MAGIC)
     throw new Error('Invalid pack magic number');
-  hash.update(buffer.slice(0, 4));
 
   // only accept version 2 packs
   if (buffer.readUInt32BE(4) !== 2)
     throw new Error('Invalid pack version');
-  hash.update(buffer.slice(4, 8));
 
   count = buffer.readUInt32BE(8);
-  hash.update(buffer.slice(8, 12));
   pos = 12;
 
   // unpack all objects
@@ -119,11 +142,7 @@ Pack.deserialize = function(buffer) {
       inflatedEntry = zlib.inflate(buffer.slice(pos), size);
       inflatedData = inflatedEntry[0];
       pos += inflatedEntry[1];
-      deserialized = type.cls.deserialize(inflatedData);
-      objectsById[deserialized[1]] = deserialized[0];
-      baseById[deserialized[1]] = {data: inflatedData, type: type};
-      baseByOffset[objPos] = {data: inflatedData, type: type};
-      rv.objects.push(deserialized[0]);
+      addObject(inflatedData, type, objPos);
     } else {
       if (type.code === 6) {
         ofsDeltaHeader = decodeOfsDeltaHeader(buffer, pos);
@@ -133,14 +152,11 @@ Pack.deserialize = function(buffer) {
         pos += inflatedEntry[1];
         baseOffset = objPos - ofsDeltaHeader[0];
         base = baseByOffset[baseOffset];
-        if (!base)
-          throw new Error('base object not found in offset');
-        patchedData = delta.patch(base.data, inflatedData)
-        deserialized = base.type.cls.deserialize(patchedData);
-        objectsById[deserialized[1]] = deserialized[0];
-        baseById[deserialized[1]] = {data: patchedData, type: type};
-        baseByOffset[objPos] = {data: patchedData, type: type};
-        rv.objects.push(deserialized[0]);
+        if (!base) {
+          pendingByOffset[baseOffset] = {data: inflatedData, offset: objPos};
+          continue;
+        }
+        addDelta(inflatedData, base, objPos);
       } else {
         // get the base sha1
         baseId = buffer.slice(pos, pos + 20).toString('hex');
@@ -150,37 +166,23 @@ Pack.deserialize = function(buffer) {
         pos += inflatedEntry[1];
         base = baseById[baseId];
         if (!base) {
-          pendingDeltas.push(
-            {data: inflatedData, baseId: baseId});
+          pendingById[baseId] = {data: inflatedData, offset: objPos};
           continue;
         }
-        patchedData = delta.patch(base.data, inflatedData)
-        deserialized = base.type.cls.deserialize(patchedData);
-        objectsById[deserialized[1]] = deserialized[0];
-        baseById[deserialized[1]] = {data: patchedData, type: type};
-        baseByOffset[objPos] = {data: patchedData, type: type};
-        rv.objects.push(deserialized[0]);
+        addDelta(inflatedData, base, objPos);
       }
     }
-    hash.update(buffer.slice(objPos, pos));
   }
 
+  hash.update(buffer.slice(0, pos));
   // verify pack integrity
   if (hash.digest('hex') !== buffer.slice(pos, pos + 20).toString('hex'))
     throw new Error('Invalid pack checksum')
 
-  // resolve pending deltas
-  while (pendingDeltas.length) {
-    pendingDelta = pendingDeltas.shift();
-    base = baseById[pendingDelta.baseId];
-    if (!base)
-      throw new Error('Pending deltas could not be resolved');
-    patchedData = delta.patch(base.data, inflatedData);
-    deserialized = base.type.cls.deserialize(patchedData);
-    objectsById[deserialized[1]] = deserialized[0];
-    baseById[deserialized[1]] = {data: patchedData, type: type};
-    rv.objects.push(deserialized[0]);
-  }
+  // check that all deltas were resolved
+  // TODO hook support for thin packs here
+  if (Object.keys(pendingByOffset).length || Object.keys(pendingById).length)
+    throw new Error('Some deltas could not be resolved');
 
   // connect the objects
   for (k in objectsById) {
