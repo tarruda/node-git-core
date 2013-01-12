@@ -1,6 +1,7 @@
 var i, codes, types
   , crypto = require('crypto')
   , zlib = require('./zlib')
+  , delta = require('./delta')
   , Commit = require('./commit')
   , Tree = require('./tree')
   , Blob = require('./blob')
@@ -18,7 +19,7 @@ codes = {
 };
 types = {};
 Object.keys(codes).forEach(function(k) {
-  types[codes[k].code] = codes[k].cls;
+  types[codes[k].code] = {cls: codes[k].cls, name: k, code: codes[k].code};
 });
 
 // this implementation is based on the information at
@@ -80,10 +81,14 @@ Pack.prototype.serialize = function() {
 }
 
 Pack.deserialize = function(buffer) {
-  var i, count, pos, type, entryHeader, inflatedEntry, inflatedData
-    , deserialized, k, cls, size
+  var i, count, objPos, pos, type, entryHeader, inflatedEntry, inflatedData
+    , ofsDeltaHeader, base, baseOffset, baseId, patchedData, pendingDelta
+    , deserialized, k, size
     , hash = crypto.createHash('sha1')
     , objectsById = {} // used after parsing objects to connect references
+    , baseByOffset = {} // used for resolving deltas by offset
+    , baseById = {} // used for resolving deltas by reference
+    , pendingDeltas = [] // what can't be resolved is stored here
     , rv = new Pack(); 
 
   // verify magic number
@@ -102,26 +107,80 @@ Pack.deserialize = function(buffer) {
 
   // unpack all objects
   for (i = 0;i < count;i++) {
-    type = (buffer[pos] & 0x70) >>> 4
-    cls = types[type];
-    if (!cls)
+    objPos = pos;
+    type = (buffer[pos] & 0x70) >>> 4;
+    type = types[type];
+    if (!type)
       throw new Error('invalid pack entry type');
     entryHeader = decodePackEntryHeader(buffer, pos);
-    hash.update(buffer.slice(pos, entryHeader[1]));
     size = entryHeader[0];
     pos = entryHeader[1];
-    inflatedEntry = zlib.inflate(buffer.slice(pos), size);
-    hash.update(buffer.slice(pos, pos + inflatedEntry[1]));
-    inflatedData = inflatedEntry[0];
-    pos += inflatedEntry[1];
-    deserialized = cls.deserialize(inflatedData);
-    objectsById[deserialized[1]] = deserialized[0];
-    rv.objects.push(deserialized[0]);
+    if (type.cls) {
+      inflatedEntry = zlib.inflate(buffer.slice(pos), size);
+      inflatedData = inflatedEntry[0];
+      pos += inflatedEntry[1];
+      deserialized = type.cls.deserialize(inflatedData);
+      objectsById[deserialized[1]] = deserialized[0];
+      baseById[deserialized[1]] = {data: inflatedData, type: type};
+      baseByOffset[objPos] = {data: inflatedData, type: type};
+      rv.objects.push(deserialized[0]);
+    } else {
+      if (type.code === 6) {
+        ofsDeltaHeader = decodeOfsDeltaHeader(buffer, pos);
+        pos = ofsDeltaHeader[1];
+        inflatedEntry = zlib.inflate(buffer.slice(pos), size);
+        inflatedData = inflatedEntry[0];
+        pos += inflatedEntry[1];
+        baseOffset = objPos - ofsDeltaHeader[0];
+        base = baseByOffset[baseOffset];
+        if (!base)
+          throw new Error('base object not found in offset');
+        patchedData = delta.patch(base.data, inflatedData)
+        deserialized = base.type.cls.deserialize(patchedData);
+        objectsById[deserialized[1]] = deserialized[0];
+        baseById[deserialized[1]] = {data: patchedData, type: type};
+        baseByOffset[objPos] = {data: patchedData, type: type};
+        rv.objects.push(deserialized[0]);
+      } else {
+        // get the base sha1
+        baseId = buffer.slice(pos, pos + 20).toString('hex');
+        pos += 20;
+        inflatedEntry = zlib.inflate(buffer.slice(pos), size);
+        inflatedData = inflatedEntry[0];
+        pos += inflatedEntry[1];
+        base = baseById[baseId];
+        if (!base) {
+          pendingDeltas.push(
+            {data: inflatedData, baseId: baseId});
+          continue;
+        }
+        patchedData = delta.patch(base.data, inflatedData)
+        deserialized = base.type.cls.deserialize(patchedData);
+        objectsById[deserialized[1]] = deserialized[0];
+        baseById[deserialized[1]] = {data: patchedData, type: type};
+        baseByOffset[objPos] = {data: patchedData, type: type};
+        rv.objects.push(deserialized[0]);
+      }
+    }
+    hash.update(buffer.slice(objPos, pos));
   }
 
   // verify pack integrity
   if (hash.digest('hex') !== buffer.slice(pos, pos + 20).toString('hex'))
     throw new Error('Invalid pack checksum')
+
+  // resolve pending deltas
+  while (pendingDeltas.length) {
+    pendingDelta = pendingDeltas.shift();
+    base = baseById[pendingDelta.baseId];
+    if (!base)
+      throw new Error('Pending deltas could not be resolved');
+    patchedData = delta.patch(base.data, inflatedData);
+    deserialized = base.type.cls.deserialize(patchedData);
+    objectsById[deserialized[1]] = deserialized[0];
+    baseById[deserialized[1]] = {data: patchedData, type: type};
+    rv.objects.push(deserialized[0]);
+  }
 
   // connect the objects
   for (k in objectsById) {
@@ -163,4 +222,17 @@ function decodePackEntryHeader(buffer, offset) {
   return [rv, offset];
 }
 
+function decodeOfsDeltaHeader(buffer, offset) {
+  var byte = buffer[offset++]
+    , rv = byte & 0x7f;
+
+  while (byte & 0x80) {
+    byte = buffer[offset++];
+    rv++;
+    rv <<= 7;
+    rv |= byte & 0x7f;
+  }
+
+  return [rv, offset];
+}
 module.exports = Pack;

@@ -20,7 +20,8 @@
     "less": "*",
     "mocha": "*",
     "chai": "*",
-    "temp": "*"
+    "temp": "*",
+    "glob": "*"
   },
   "author": "Thiago de Arruda",
   "license": "BSD"

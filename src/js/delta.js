@@ -1,9 +1,11 @@
 // the delta encoding used by git was inferred by reading the original
 // source at https://github.com/git/git/blob/master/patch-delta.c
-var MIN_COPY_LENGTH = 4; // minimum match length for copy instruction
+var util = require('util')
+  , MIN_COPY_LENGTH = 4; // minimum match length for copy instruction
                         
 
 // produces a buffer that is the result of 'delta' applied to 'base'
+// algorithm taken from 'patch-delta.c' in the git source tree
 function patchDelta(base, delta) {
   var rv, opcode, baseOffset, copyLength
     , rvOffset = 0
@@ -80,7 +82,7 @@ function patchDelta(base, delta) {
 //    assuming an average line length of 17
 //
 // this is slow and was added more as a utility for testing
-// 'patchDelta' and documenting git delta encoding, so it 
+// 'patchDelta' and documenting git delta encoding format, so it 
 // should not be used indiscriminately
 function diffDelta(source, target) {
   var block, matchOffsets, match, insertLength
@@ -294,8 +296,9 @@ function decodeHeader(buffer) {
   return [nextSize(), nextSize(), offset];
 }
 
-// hashtable where keys are Buffer instances and can store more than
-// one value per key(since blocks can be repeated in text)
+// hashtable to store locations where a block of data appears in
+// the source buffer. keys are Buffer instances(which contain the
+// block data).
 function Blocks(n) {
   this.array = new Array(n);
   this.n = n;
@@ -319,23 +322,11 @@ Blocks.prototype.set = function(key, value) {
     this.array[idx] = new Bucket(key, value);
 };
 
+// Bucket node for the above hashtable. it can store more than one
+// value per key(since blocks can be repeated)
 function Bucket(key, value) {
   this.key = key;
   this.value = [value];
-}
-
-function compareBuffers(a, b) {
-  var i = 0;
-
-  if (a.length !== b.length)
-    return false;
-
-  while (i < a.length && a[i] === b[i]) i++;
-
-  if (i < a.length)
-    return false;
-
-  return true;
 }
 
 Bucket.prototype.get = function(key) {
@@ -355,8 +346,10 @@ Bucket.prototype.set = function(key, value) {
     node = node.next;
 
   if (compareBuffers(node.key, key))
-    node.value.push(value); // this represents more occurences of the pattern
+    // add more occurences of the block
+    node.value.push(value); 
   else
+    // new block
     node.next = new Bucket(key, value);
 };
 
@@ -368,14 +361,27 @@ function hash(buffer) {
 
   while (i < j) {
     w *= 29;
-    w %= (1 << 30);
+    w = w & ((2 << 29) - 1);
     rv += buffer[i++] * w;
-    rv %= (1 << 30);
+    rv = rv & ((2 << 29) - 1);
   }
 
   return rv;
 }
 
+function compareBuffers(a, b) {
+  var i = 0;
 
-exports.patchDelta = patchDelta;
-exports.diffDelta = diffDelta;
+  if (a.length !== b.length)
+    return false;
+
+  while (i < a.length && a[i] === b[i]) i++;
+
+  if (i < a.length)
+    return false;
+
+  return true;
+}
+
+exports.patch = patchDelta;
+exports.diff = diffDelta;

@@ -2,12 +2,13 @@ fs = require 'fs'
 path = require 'path'
 temp = require 'temp'
 zlib = require 'zlib'
+glob = require 'glob'
 wrench = require 'wrench'
 {spawn} = require 'child_process'
 {expect} = require 'chai'
 {Blob, Tree, Commit, Tag, Pack} = require '../src/js'
 _zlib = require '../src/js/zlib'
-{patchDelta, diffDelta} = require '../src/js/delta'
+{patch, diff} = require '../src/js/delta'
 
 
 createGitRepo = (done) ->
@@ -65,16 +66,19 @@ testObjects = ->
   d1 = new Date 1000000000
   d2 = new Date 2000000000
   d3 = new Date 3000000000
-  @b1 = new Blob 'test content\ntest content2\ntest content3\n'
+  str = ''
+  for i in [0...1000]
+    str += 'test content/test content2/test content3\n'
+  @b1 = new Blob str
   # this encode second blob as a delta of the first in packfiles
-  @b2 = new Blob 'test content\ntest content2\ntest content3\nappend'
+  @b2 = new Blob str + 'append'
   @b3 = new Blob 'subdir test content\n'
   @t1 = new Tree {
     'file-under-tree': @b3
   }
   @t2 = new Tree {
-    'some-file': @b1
     'some-file.txt': @b2
+    'some-file2.txt': @b1
     'sub-directory.d': @t1
   }
   @t3 = new Tree {
@@ -99,7 +103,7 @@ suite 'object serialization/deserialization', ->
   test 'tree', ->
     serialized = @t2.serialize()
     [tree, hash] = Tree.deserialize serialized.getData()
-    expect(tree.children['some-file']).to.equal @b1.serialize()
+    expect(tree.children['some-file2.txt']).to.equal @b1.serialize()
       .getHash()
     expect(tree.children['some-file.txt']).to.equal @b2.serialize()
       .getHash()
@@ -183,6 +187,36 @@ suite 'git repository manipulation', ->
             expect(stderr).to.equal ''
             done()
 
+  test 'parse repository packed object(with delta entries)', (done) ->
+    gitGc = spawn 'git', ['gc'], cwd: @path
+    captureOutput gitGc, =>
+      packDir = path.join @path, '.git', 'objects', 'pack'
+      files = glob.sync packDir + '/*.pack'
+      packData = fs.readFileSync files[0]
+      pack = Pack.deserialize packData
+      # delete de pack files
+      files = glob.sync packDir + '/*'
+      for file in files
+        fs.unlinkSync(file)
+      # git-fsck should report errors since there are broken refs
+      gitFsck = spawn 'git', ['fsck', '--strict'], cwd: @path
+      captureOutput gitFsck, (stdout, stderr) =>
+        expect(stdout).to.equal ''
+        expect(stderr).to.match /HEAD\:\s+invalid\s+sha1\s+pointer/
+        gitUnpack = spawn 'git', ['unpack-objects', '-q', '--strict'],
+          cwd: @path
+        gitUnpack.stdin.end(pack.serialize())
+        captureOutput gitUnpack, (stdout, stderr) =>
+          expect(stdout).to.equal ''
+          expect(stderr).to.equal ''
+          # git-fsck should be happy again
+          gitFsck = spawn 'git', ['fsck', '--strict'], cwd: @path
+          captureOutput gitFsck, (stdout, stderr) =>
+            expect(stdout).to.equal ''
+            expect(stderr).to.equal ''
+            done()
+
+
 
 suite 'zlib binding', ->
   test 'deflate/inflate some data synchronously', ->
@@ -209,7 +243,7 @@ suite 'delta encoding/decoding', ->
   test 'encode/decode 1', ->
     a = new Buffer "text file line 1\ntext file line 2\na"
     b = new Buffer "text file line 2\ntext file line 1\nab"
-    delta = diffDelta a, b
+    delta = diff a, b
     # the expected instructions to produce 'b' from 'a' are:
     # 1 - copy 17 bytes from offset 17
     # 2 - copy 17 bytes from offset 0
@@ -227,8 +261,8 @@ suite 'delta encoding/decoding', ->
     # ----
     # 02 = (insert) the next two bytes
     # 61 62 = a b
-    expect(delta.toString('hex')).to.equal('23249111119011026162')
-    patched = patchDelta a, delta
+    expect(delta.toString('hex')).to.equal '23249111119011026162'
+    patched = patch a, delta
     expect(patched.toString 'hex').to.equal b.toString 'hex'
 
   test 'encode/decode 2', ->
@@ -255,7 +289,7 @@ suite 'delta encoding/decoding', ->
       h
       """
     )
-    delta = diffDelta a, b
+    delta = diff a, b
     # the expected instructions to produce 'b' from 'a' are:
     # 1 - copy 10 bytes from offset 0
     # 2 - insert 'text file line 1'
@@ -280,7 +314,7 @@ suite 'delta encoding/decoding', ->
     # observation:
     # while it might seem that the 'rst' substring should match,
     # notice that in the first buffer it actually is 'rst\n'
-    patched = patchDelta a, delta
+    patched = patch a, delta
     expect(delta.toString 'hex').to.equal(
       '352d900b056f7264730a911a150862610a7273740a68')
     expect(patched.toString 'hex').to.equal b.toString 'hex'
@@ -295,7 +329,7 @@ suite 'delta encoding/decoding', ->
     d = new Buffer 1 << 13 # 8192
     d.fill 200
     d = Buffer.concat [b, c, d]
-    delta = diffDelta a, d
+    delta = diff a, d
     # the expected instructions to produce 'd' from 'a' are:
     # 1 - copy 8182 bytes from offset 0
     # 2 - insert c7(199) 10 times and c8(200) 80 times(block size is 90)
@@ -315,6 +349,6 @@ suite 'delta encoding/decoding', ->
     # 1f = (31 << 8) length (176 + (31 << 8)) == 8112
     # ----
     # 8182 + 90 + 8112 = 16384
-    patched = patchDelta a, delta
+    patched = patch a, delta
     expect(patched.toString 'hex').to.equal d.toString 'hex'
 
