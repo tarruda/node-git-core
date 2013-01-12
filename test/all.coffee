@@ -169,9 +169,58 @@ suite 'object serialization/deserialization', ->
   test 'pack', ->
     pack = new Pack [@c3, @tag]
     serialized = pack.serialize()
-    deserialized = Pack.deserialize(serialized)
+    deserialized = Pack.deserialize serialized
     expect(serialized.toString 'base64').to.equal(
-      deserialized.serialize().toString('base64'))
+      deserialized.serialize().toString 'base64')
+
+  test 'pack with deltas and base object', ->
+    str = ''
+    for i in [0...1000]
+      str += 'test content/test content2/test content3\n'
+    b1 = new Blob str
+    b2 = new Blob str + 'append\n'
+    b3 = new Blob str + 'append\nappend2\n'
+    b4 = new Blob str + 'append\nappend2\nappend3\n'
+    # pack only b1 and deltas necessary for b2, b3 and b4
+    pack = new Pack [
+      b1
+      b2.diff b1
+      b3.diff b2
+      b4.diff b3
+    ]
+    pack2 = Pack.deserialize pack.serialize()
+    expect(pack2.objects[0].contents.toString()).to.equal b1.contents
+    expect(pack2.objects[1].contents.toString()).to.equal b2.contents
+    expect(pack2.objects[2].contents.toString()).to.equal b3.contents
+    expect(pack2.objects[3].contents.toString()).to.equal b4.contents
+
+  test 'pack with deltas and no base object(thin pack)', ->
+    str = ''
+    for i in [0...1000]
+      str += 'test content/test content2/test content3\n'
+    b1 = new Blob str
+    b2 = new Blob str + 'append\n'
+    b3 = new Blob str + 'append\nappend2\n'
+    b4 = new Blob str + 'append\nappend2\nappend3\n'
+    # pack only b1 and deltas necessary for b2, b3 and b4
+    pack = new Pack [
+      b2.diff b1
+      b3.diff b2
+      b4.diff b3
+    ]
+    pack2 = null
+    # deserialize on thin pack will throw without a function 
+    # second argument
+    expect(-> pack2 = Pack.deserialize pack.serialize()).to.throw()
+    pack2 = Pack.deserialize pack.serialize(), (baseId) ->
+      # this function is called for resolving base objects
+      # not found in the pack
+      expect(baseId).to.equal b1.serialize().getHash()
+      return b1
+    expect(pack2.objects[0].contents.toString()).to.equal b2.contents
+    expect(pack2.objects[1].contents.toString()).to.equal b3.contents
+    expect(pack2.objects[2].contents.toString()).to.equal b4.contents
+
 
 suite 'git repository manipulation', ->
 

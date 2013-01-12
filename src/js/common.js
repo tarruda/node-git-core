@@ -117,7 +117,7 @@ GitObject.prototype.diff = function(other) {
   if (this.constructor !== other.constructor)
     throw new Error('Can only create deltas from objects of the same type');
 
-  return new Delta(this, other);
+  return new delta.Delta(other, this);
 };
 
 GitObject.getObjectInfo = function(type, contents) {

@@ -66,7 +66,7 @@ Pack.prototype.serialize = function() {
   header = new Buffer(12);
   header.write(MAGIC);
   header.writeUInt32BE(2, 4);
-  header.writeUInt32BE(Object.keys(processedBySha1).length, 8);
+  header.writeUInt32BE(Object.keys(processedBySha1).length + deltas.length, 8);
   contentArray.push(header);
   hash.update(header);
   offset = 12;
@@ -267,7 +267,7 @@ Pack.deserialize = function(buffer, resolveBase) {
     serialized = base.serialize();
     if (serialized.getHash() !== k)
       throw new Error('Invalid base object for delta decoding');
-    type = types[codes[serialized.getType()]];
+    type = codes[serialized.getType()];
     i = rv.objects.length;
     // add it temporarily
     addObject(serialized.getPackData(), type, -1);
