@@ -287,6 +287,8 @@ Pack.deserialize = function(buffer, resolveBase) {
     objectsById[k].resolveReferences(objectsById);
   }
 
+  rv.objectsById = objectsById;
+
   return rv;
 };
 
