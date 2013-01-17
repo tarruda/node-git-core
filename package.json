@@ -1,6 +1,6 @@
 {
   "name": "git-core",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Simple library for working git core structures(blobs, trees, commits, tags and packs) without a repository",
   "main": "./src/js/index.js",
   "scripts": {
