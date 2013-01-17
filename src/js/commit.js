@@ -77,26 +77,28 @@ Commit.deserialize = function(contents) {
   // author
   match = /^author\s(.+)\s<(.*)>\s(.+)$/.exec(info.contents.slice(
     pos, common.findLinefeed(info.contents, pos)).toString('utf8'));
-  if (!match)
-    throw new Error('commit missing author');
-  author = {
-      name: match[1]
-    , email: match[2]
-    , date: common.parseDate(match[3])
+  if (match) {
+    author = {
+        name: match[1]
+      , email: match[2]
+      , date: common.parseDate(match[3])
+    };
+    pos += Buffer.byteLength(match[0]) + 1;
   }
-  pos += Buffer.byteLength(match[0]) + 1;
 
   // committer
   match = /^committer\s(.+)\s<(.*)>\s(.+)$/.exec(info.contents.slice(
     pos, common.findLinefeed(info.contents, pos)).toString('utf8'));
-  if (!match)
-    throw new Error('commit missing committer');
-  committer = {
-      name: match[1]
-    , email: match[2]
-    , date: common.parseDate(match[3])
+  if (match) {
+    committer = {
+        name: match[1]
+      , email: match[2]
+      , date: common.parseDate(match[3])
+    };
+    pos += Buffer.byteLength(match[0]) + 1;
   }
-  pos += Buffer.byteLength(match[0]) + 3;
+
+  pos += 2;
 
   // message
   message = info.contents.slice(pos).toString('utf8');

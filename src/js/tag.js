@@ -60,30 +60,32 @@ Tag.deserialize = function(contents) {
   // type
   match = /^type\s(commit|tree|blob)$/.exec(info.contents.slice(
     pos, common.findLinefeed(info.contents, pos)).toString('utf8'));
-  if (!match)
-    throw new Error('tag missing type');
-  type = match[1];
-  pos += match[0].length + 1;
+  if (match) {
+    type = match[1];
+    pos += match[0].length + 1;
+  }
 
   // tag name
   match = /^tag\s(.+)$/.exec(info.contents.slice(
     pos, common.findLinefeed(info.contents, pos)).toString('utf8'));
-  if (!match)
-    throw new Error('tag missing name');
-  tag = match[1];
-  pos += Buffer.byteLength(match[0]) + 1;
+  if (match) {
+    tag = match[1];
+    pos += Buffer.byteLength(match[0]) + 1;
+  }
 
   // tagger
   match = /^tagger\s(.+)\s<(.*)>\s(.+)$/.exec(info.contents.slice(
     pos, common.findLinefeed(info.contents, pos)).toString('utf8'));
-  if (!match)
-    throw new Error('tag missing tagger');
-  tagger = {
-      name: match[1]
-    , email: match[2]
-  };
-  date = common.parseDate(match[3]);
-  pos += Buffer.byteLength(match[0]) + 3;
+  if (match) {
+    tagger = {
+        name: match[1]
+      , email: match[2]
+    };
+    date = common.parseDate(match[3]);
+    pos += Buffer.byteLength(match[0]) + 1;
+  }
+
+  pos += 2;
 
   // message
   message = info.contents.slice(pos).toString('utf8');

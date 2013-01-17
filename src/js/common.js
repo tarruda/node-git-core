@@ -124,7 +124,8 @@ GitObject.getObjectInfo = function(type, contents) {
   var rv, header, hash, match
     , fullContents = contents;
 
-  if (contents.slice(0, type.length).toString('utf8') !== type) {
+  if (contents.length < type.length ||
+      contents.slice(0, type.length).toString('utf8') !== type) {
     // append header so the hash can be calculated
     header = new Buffer(type + " " + contents.length);
     fullContents = Buffer.concat([header, NULL, contents]);
