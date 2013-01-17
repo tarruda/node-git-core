@@ -38,8 +38,7 @@ Commit.prototype.serialize = function(visitor) {
   if (!this.committer) this.committer = this.author;
   contentArray.push("committer " + this.committer.name + " <" +
                    (this.committer.email || '') + "> " +
-                   common.timestamp(this.committer.date));
-  contentArray.push('\n');
+                   common.timestamp(this.committer.date) + '\n');
   contentArray.push(this.message);
 
   return this._serialize(new Buffer(contentArray.join('\n')), visitor);
@@ -98,7 +97,7 @@ Commit.deserialize = function(contents) {
     pos += Buffer.byteLength(match[0]) + 1;
   }
 
-  pos += 2;
+  pos += 1;
 
   // message
   message = info.contents.slice(pos).toString('utf8');

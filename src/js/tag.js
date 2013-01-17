@@ -34,8 +34,7 @@ Tag.prototype.serialize = function(visitor) {
   contentArray.push("tag " + this.name);
   contentArray.push("tagger " + this.tagger.name + " <" +
                    (this.tagger.email || '') + "> " +
-                   common.timestamp(this.date));
-  contentArray.push('\n');
+                   common.timestamp(this.date) + '\n');
   contentArray.push(this.message);
 
   return this._serialize(new Buffer(contentArray.join('\n')), visitor);
@@ -85,7 +84,7 @@ Tag.deserialize = function(contents) {
     pos += Buffer.byteLength(match[0]) + 1;
   }
 
-  pos += 2;
+  pos += 1;
 
   // message
   message = info.contents.slice(pos).toString('utf8');
