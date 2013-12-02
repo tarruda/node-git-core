@@ -3,7 +3,7 @@
 Library that provides simple object-oriented api for working with git data at a
 lower level, see [git internals](http://git-scm.com/book/en/Git-Internals) for more info:
 
-#### prepare
+#### Prepare
 
 * For Ubuntu, need install packages:
 
