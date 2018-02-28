@@ -139,7 +139,7 @@ Pack.prototype.serialize = function() {
   return Buffer.concat(contentArray);
 }
 
-Pack.deserialize = function(buffer, resolveBase) {
+Pack.deserialize = function(buffer, resolveBase, callback) {
   var i, count, objPos, pos, type, entryHeader, inflatedEntry, inflatedData
     , ofsDeltaHeader, base, baseOffset, baseId, patchedData, pendingDelta
     , deserialized, k, size, keys, serialized
