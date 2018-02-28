@@ -1,10 +1,10 @@
 {
   "name": "git-core",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Simple library for working git core structures(blobs, trees, commits, tags and packs) without a repository",
-  "main": "./src/js/index.js",
+  "main": "./src/index.js",
   "scripts": {
-    "test": "make test"
+    "test": "mocha --ui tdd test/all.js"
   },
   "repository": {
     "type": "git",
@@ -15,7 +15,6 @@
     "git-objects"
   ],
   "devDependencies": {
-    "node-gyp": "*",
     "wrench": "*",
     "less": "*",
     "mocha": "*",
